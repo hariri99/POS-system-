@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, BarChart3, Boxes, ReceiptText, ShieldCheck } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getAppSession } from "@/lib/auth";
@@ -40,28 +41,31 @@ export default async function HomePage() {
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-[1440px] flex-col">
         <header className="surface-card flex items-center justify-between rounded-[24px] px-5 py-4">
           <div className="flex items-center gap-3">
-            <Badge className="border-[var(--brand)]/25 bg-[var(--brand)]/12 text-[var(--brand-soft)]">
+            <Badge className="border-[var(--border-accent)] bg-[var(--brand-surface)] text-[var(--brand)]">
               ProteinOS
             </Badge>
             <p className="hidden text-sm text-[var(--muted-foreground)] md:block">
               Premium POS and inventory operations for supplement retail
             </p>
           </div>
-          <Link
-            href="/login"
-            className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-4 text-sm font-semibold text-[var(--foreground)] transition-colors hover:bg-white/[0.08]"
-          >
-            Open platform
-          </Link>
+          <div className="flex items-center gap-3">
+            <ThemeToggle compact />
+            <Link
+              href="/login"
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-4 text-sm font-semibold text-[var(--heading)] transition-colors hover:bg-[var(--surface-soft)]"
+            >
+              Open platform
+            </Link>
+          </div>
         </header>
 
         <section className="grid flex-1 items-center gap-10 py-14 lg:grid-cols-[1.16fr_0.84fr] lg:py-20">
           <div className="space-y-8">
-            <Badge className="border-sky-500/25 bg-sky-500/12 text-sky-200">
+            <Badge className="border-[var(--border-accent)] bg-[var(--brand-surface)] text-[var(--brand)]">
               Next.js and Supabase architecture
             </Badge>
             <div className="space-y-5">
-              <h1 className="max-w-4xl text-5xl font-semibold tracking-[-0.04em] text-white md:text-7xl">
+              <h1 className="max-w-4xl text-5xl font-semibold tracking-[-0.04em] text-[var(--heading)] md:text-7xl">
                 Premium retail control for protein and supplement stores.
               </h1>
               <p className="max-w-2xl text-lg leading-8 text-[var(--muted-foreground)]">
@@ -73,14 +77,14 @@ export default async function HomePage() {
             <div className="flex flex-wrap gap-4">
               <Link
                 href="/login"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-5 text-sm font-semibold text-[var(--brand-ink)] shadow-[0_12px_24px_rgba(180,83,9,0.18)] transition-colors hover:bg-[var(--brand-strong)]"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-5 text-sm font-semibold text-white shadow-[var(--shadow-brand)] transition-colors hover:bg-[var(--brand-strong)]"
               >
                 Launch dashboard
                 <ArrowRight className="size-4" />
               </Link>
               <a
                 href="#capabilities"
-                className="inline-flex h-12 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-5 text-sm font-semibold text-[var(--foreground)] transition-colors hover:bg-white/[0.08]"
+                className="inline-flex h-12 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-5 text-sm font-semibold text-[var(--heading)] transition-colors hover:bg-[var(--surface-soft)]"
               >
                 Explore capabilities
               </a>
@@ -88,11 +92,11 @@ export default async function HomePage() {
           </div>
 
           <Card className="data-grid relative overflow-hidden">
-            <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-[var(--brand)]/8 to-transparent" />
+            <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-[var(--brand-surface)] to-transparent" />
             <div className="relative space-y-5">
               <div>
                 <p className="section-kicker">Built for</p>
-                <h2 className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-white">
+                <h2 className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-[var(--heading)]">
                   Hybrid POS and management operations
                 </h2>
               </div>
@@ -120,11 +124,11 @@ export default async function HomePage() {
             const Icon = item.icon;
             return (
               <Card key={item.title} className="space-y-4">
-                <div className="inline-flex rounded-[18px] border border-[var(--border)] bg-white/[0.04] p-3 text-[var(--brand-soft)]">
+                <div className="inline-flex rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] p-3 text-[var(--brand)]">
                   <Icon className="size-5" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-semibold text-white">{item.title}</h3>
+                  <h3 className="text-xl font-semibold text-[var(--heading)]">{item.title}</h3>
                   <p className="mt-2 text-sm leading-7 text-[var(--muted-foreground)]">
                     {item.description}
                   </p>

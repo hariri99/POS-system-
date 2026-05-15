@@ -13,7 +13,7 @@ export function SalesOverviewChart({
     <Card className="space-y-6">
       <div className="flex items-end justify-between">
         <div>
-          <p className="text-sm font-semibold text-white">Sales velocity</p>
+          <p className="text-sm font-semibold text-[var(--heading)]">Sales velocity</p>
           <p className="mt-1 text-sm text-[var(--muted-foreground)]">
             Seven-day revenue and transaction trend for rapid store health checks.
           </p>
@@ -24,23 +24,29 @@ export function SalesOverviewChart({
           <AreaChart data={data}>
             <defs>
               <linearGradient id="revenue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#d97706" stopOpacity={0.38} />
-                <stop offset="95%" stopColor="#d97706" stopOpacity={0} />
+                <stop offset="5%" stopColor="var(--brand)" stopOpacity={0.26} />
+                <stop offset="95%" stopColor="var(--brand)" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-            <XAxis dataKey="label" stroke="#8d96a6" tickLine={false} axisLine={false} />
+            <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
+            <XAxis
+              dataKey="label"
+              stroke="var(--muted-foreground)"
+              tickLine={false}
+              axisLine={false}
+            />
             <YAxis
-              stroke="#8d96a6"
+              stroke="var(--muted-foreground)"
               tickLine={false}
               axisLine={false}
               tickFormatter={(value) => `$${value}`}
             />
             <Tooltip
               contentStyle={{
-                background: "#171a20",
+                background: "var(--surface-strong)",
                 borderRadius: "16px",
-                border: "1px solid rgba(255,255,255,0.08)",
+                border: "1px solid var(--border)",
+                color: "var(--foreground)",
               }}
               formatter={(value, name) => {
                 const numericValue = typeof value === "number" ? value : Number(value ?? 0);
@@ -50,7 +56,7 @@ export function SalesOverviewChart({
             <Area
               type="monotone"
               dataKey="revenue"
-              stroke="#f59e0b"
+              stroke="var(--brand)"
               fillOpacity={1}
               fill="url(#revenue)"
               strokeWidth={2.5}

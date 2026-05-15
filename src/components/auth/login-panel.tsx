@@ -65,11 +65,11 @@ export function LoginPanel({ isSupabaseEnabled }: { isSupabaseEnabled: boolean }
     <div className="grid gap-6 lg:grid-cols-[1.08fr_0.92fr]">
       <Card className="space-y-6">
         <div className="space-y-3">
-          <div className="inline-flex rounded-full border border-[var(--brand)]/20 bg-[var(--brand)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[var(--brand-soft)]">
+          <div className="inline-flex rounded-xl border border-[var(--border-accent)] bg-[var(--brand-surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[var(--brand)]">
             Secure access
           </div>
           <div>
-            <h1 className="text-3xl font-semibold tracking-[-0.03em] text-white">
+            <h1 className="text-3xl font-semibold tracking-[-0.03em] text-[var(--heading)]">
               Sign into ProteinOS
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-7 text-[var(--muted-foreground)]">
@@ -115,18 +115,18 @@ export function LoginPanel({ isSupabaseEnabled }: { isSupabaseEnabled: boolean }
         )}
 
         {error ? (
-          <div className="rounded-[18px] border border-[var(--danger)]/20 bg-[var(--danger)]/10 px-4 py-3 text-sm text-white">
+          <div className="rounded-[18px] border border-[var(--danger)]/18 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--heading)] dark:text-white">
             {error}
           </div>
         ) : null}
       </Card>
 
       <Card className="space-y-5">
-        <div className="inline-flex size-12 items-center justify-center rounded-[18px] border border-[var(--border)] bg-white/[0.04] text-[var(--brand-soft)]">
+        <div className="inline-flex size-12 items-center justify-center rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] text-[var(--brand)]">
           <ShieldCheck className="size-6" />
         </div>
         <div>
-          <h2 className="text-xl font-semibold text-white">Deployment-ready authentication</h2>
+          <h2 className="text-xl font-semibold text-[var(--heading)]">Deployment-ready authentication</h2>
           <p className="mt-2 text-sm leading-7 text-[var(--muted-foreground)]">
             This project is wired for Supabase Auth and PostgreSQL row-level security. When
             environment keys are absent, demo mode keeps the management platform explorable.
@@ -135,16 +135,16 @@ export function LoginPanel({ isSupabaseEnabled }: { isSupabaseEnabled: boolean }
         <div className="surface-card-strong rounded-[18px] p-4 text-sm text-[var(--muted-foreground)]">
           {isSupabaseEnabled ? (
             <>
-              <p className="font-semibold text-white">Live authentication mode</p>
+              <p className="font-semibold text-[var(--heading)]">Live authentication mode</p>
               <p className="mt-2">Create your first real admin account with:</p>
-              <p className="mt-2 font-medium text-white">
+              <p className="mt-2 font-medium text-[var(--heading)]">
                 `npm run create:admin -- --email owner@example.com --password YourStrongPassword123! --name &quot;Owner Name&quot;`
               </p>
               <p className="mt-4">Then sign in here with the same email and password.</p>
             </>
           ) : (
             <>
-              <p className="font-semibold text-white">Demo credentials</p>
+              <p className="font-semibold text-[var(--heading)]">Demo credentials</p>
               <p className="mt-2">Admin: `admin@protein.local`</p>
               <p>Password: `password123`</p>
               <p className="mt-4">

@@ -18,6 +18,7 @@ export default async function AdminProductsPage() {
       <ProductManager
         products={snapshot.products}
         categories={snapshot.categories}
+        suppliers={snapshot.suppliers}
       />
     </div>
   );

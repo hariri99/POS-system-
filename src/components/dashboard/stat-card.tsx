@@ -29,7 +29,7 @@ export function StatCard({
         </div>
       </div>
       <div className="space-y-2">
-        <p className="text-3xl font-semibold tracking-[-0.03em] text-white">{value}</p>
+        <p className="text-3xl font-semibold tracking-[-0.03em] text-[var(--heading)]">{value}</p>
         <p className="text-sm leading-6 text-[var(--muted-foreground)]">{helper}</p>
       </div>
     </Card>

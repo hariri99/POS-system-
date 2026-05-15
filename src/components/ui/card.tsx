@@ -10,7 +10,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "surface-card rounded-[24px] p-5 backdrop-blur-sm lg:p-6",
+        "surface-card rounded-[26px] p-5 backdrop-blur-[8px] lg:p-6",
         className,
       )}
     >
