@@ -5,11 +5,13 @@ import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireRole } from "@/lib/auth";
 import { getDashboardSnapshot } from "@/lib/platform";
+import { buildExecutiveReport } from "@/lib/reporting";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 
 export default async function AdminOverviewPage() {
   const session = await requireRole("admin");
   const snapshot = await getDashboardSnapshot(session);
+  const report = buildExecutiveReport(snapshot);
   const riskProducts = snapshot.products
     .filter((product) => product.stockQuantity <= product.reorderPoint || product.expiryDate)
     .slice(0, 6);
@@ -27,29 +29,29 @@ export default async function AdminOverviewPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Today revenue"
-          value={formatCurrency(snapshot.summary.todayRevenue)}
-          helper="Live total from the current business day"
+          value={formatCurrency(report.kpis.todayRevenue)}
+          helper="Gross cash-in across completed sales today"
         />
         <StatCard
-          label="Transactions"
-          value={String(snapshot.summary.todayTransactions)}
-          helper="Completed checkouts processed today"
+          label="Today net profit"
+          value={formatCurrency(report.kpis.todayNetProfit)}
+          helper="Actual earnings after COGS and today's expenses"
         />
         <StatCard
-          label="Average basket"
-          value={formatCurrency(snapshot.summary.averageBasket)}
-          helper="Useful for promo and bundle analysis"
+          label="Monthly profit"
+          value={formatCurrency(report.kpis.monthlyNetProfit)}
+          helper="Current-month net result, not just sales volume"
         />
         <StatCard
-          label="Low stock items"
-          value={String(snapshot.summary.lowStockCount)}
-          helper="SKUs at or below threshold"
+          label="Inventory value"
+          value={formatCurrency(report.kpis.inventoryValue)}
+          helper="Capital currently sitting in stock"
           trend="down"
         />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
-        <SalesOverviewChart data={snapshot.salesTrend} />
+        <SalesOverviewChart data={report.salesTrend} />
         <Card className="space-y-4">
           <div>
             <h2 className="text-xl font-semibold text-white">Alerts and exceptions</h2>

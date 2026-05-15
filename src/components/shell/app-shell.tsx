@@ -5,11 +5,9 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   BarChart3,
-  Boxes,
   PackageSearch,
   ReceiptText,
   Store,
-  Truck,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -20,9 +18,7 @@ import { type AppSession } from "@/lib/types";
 const adminLinks = [
   { href: "/admin", label: "Overview", icon: BarChart3 },
   { href: "/admin/products", label: "Products", icon: PackageSearch },
-  { href: "/admin/inventory", label: "Inventory", icon: Boxes },
   { href: "/admin/sales", label: "Sales", icon: ReceiptText },
-  { href: "/admin/suppliers", label: "Suppliers", icon: Truck },
   { href: "/admin/employees", label: "Employees", icon: Users },
   { href: "/admin/reports", label: "Reports", icon: Activity },
 ];
@@ -43,8 +39,8 @@ export function AppShell({
 
   return (
     <div className="min-h-screen text-[var(--foreground)]">
-      <div className="mx-auto grid max-w-[1720px] gap-5 px-4 py-4 lg:grid-cols-[252px_minmax(0,1fr)] lg:px-5 lg:py-5">
-        <aside className="surface-card sticky top-4 self-start rounded-[26px] p-3.5 lg:min-h-[calc(100vh-2rem)] lg:p-4">
+      <div className="mx-auto max-w-[1720px] px-4 py-4 lg:px-5 lg:py-5">
+        <aside className="surface-card mb-5 rounded-[26px] p-3.5 lg:fixed lg:top-4 lg:left-[max(1.25rem,calc((100vw-1720px)/2+1.25rem))] lg:mb-0 lg:h-[calc(100vh-2rem)] lg:w-[252px] lg:overflow-hidden lg:p-4">
           <div className="flex h-full flex-col gap-5">
             <div className="space-y-3.5">
               <Badge className="border-[var(--border-accent)] bg-[var(--brand-surface)] text-[var(--brand)]">
@@ -56,10 +52,6 @@ export function AppShell({
                 </div>
                 <div className="space-y-2">
                   <h2 className="text-lg font-semibold text-[var(--heading)]">Retail operations</h2>
-                  <p className="text-sm leading-6 text-[var(--muted-foreground)]">
-                    White-first retail controls built for checkout speed, inventory clarity, and
-                    store-level decision making.
-                  </p>
                 </div>
               </div>
             </div>
@@ -114,7 +106,7 @@ export function AppShell({
           </div>
         </aside>
 
-        <div className="min-w-0">
+        <div className="min-w-0 lg:pl-[272px]">
           <header className="surface-card sticky top-4 z-20 mb-5 flex flex-col gap-4 rounded-[24px] p-4 backdrop-blur-[8px] md:flex-row md:items-center md:justify-between lg:px-5">
             <div>
               <p className="text-sm font-semibold text-[var(--heading)]">

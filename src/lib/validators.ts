@@ -13,6 +13,8 @@ export const productMutationSchema = z.object({
   sku: z.string().min(3),
   barcode: z.string().min(6),
   salePrice: z.coerce.number().min(0),
+  wholesalePrice: z.coerce.number().min(0),
+  discountPrice: z.coerce.number().min(0).nullable().optional(),
   costPrice: z.coerce.number().min(0),
   stockQuantity: z.coerce.number().int().min(0),
   reorderPoint: z.coerce.number().int().min(0),
@@ -35,6 +37,7 @@ export const posSaleSchema = z.object({
         productId: z.string().min(1),
         quantity: z.coerce.number().int().positive(),
         unitPrice: z.coerce.number().min(0),
+        pricingTier: z.enum(["retail", "wholesale", "discount"]).default("retail"),
         discountAmount: z.coerce.number().min(0).default(0),
       }),
     )

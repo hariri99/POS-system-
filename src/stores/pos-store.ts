@@ -1,13 +1,38 @@
 "use client";
 
 import { create } from "zustand";
-import { type PosCartLine, type ProductRecord } from "@/lib/types";
+import { type PosCartLine, type ProductPricingTier, type ProductRecord } from "@/lib/types";
+
+function resolvePriceForTier(product: ProductRecord, pricingTier: ProductPricingTier) {
+  if (pricingTier === "wholesale") {
+    return product.wholesalePrice;
+  }
+
+  if (pricingTier === "discount" && product.discountPrice != null) {
+    return product.discountPrice;
+  }
+
+  return product.salePrice;
+}
+
+function resolveCartPriceForTier(item: PosCartLine, pricingTier: ProductPricingTier) {
+  if (pricingTier === "wholesale") {
+    return item.wholesalePrice;
+  }
+
+  if (pricingTier === "discount" && item.discountPrice != null) {
+    return item.discountPrice;
+  }
+
+  return item.retailPrice;
+}
 
 interface PosStore {
   cart: PosCartLine[];
   addProduct: (product: ProductRecord) => void;
   removeProduct: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
+  updatePricingTier: (productId: string, pricingTier: ProductPricingTier) => void;
   updateDiscount: (productId: string, discountAmount: number) => void;
   clearCart: () => void;
 }
@@ -38,7 +63,12 @@ export const usePosStore = create<PosStore>((set) => ({
             name: product.name,
             sku: product.sku,
             barcode: product.barcode,
-            unitPrice: product.salePrice,
+            unitPrice: resolvePriceForTier(product, "retail"),
+            pricingTier: "retail",
+            retailPrice: product.salePrice,
+            wholesalePrice: product.wholesalePrice,
+            discountPrice: product.discountPrice,
+            costPrice: product.costPrice,
             quantity: 1,
             discountAmount: 0,
             stockQuantity: product.stockQuantity,
@@ -61,6 +91,18 @@ export const usePosStore = create<PosStore>((set) => ({
           : item,
       ),
     })),
+  updatePricingTier: (productId, pricingTier) =>
+    set((state) => ({
+      cart: state.cart.map((item) =>
+        item.productId === productId
+          ? {
+              ...item,
+              pricingTier,
+              unitPrice: resolveCartPriceForTier(item, pricingTier),
+            }
+          : item,
+      ),
+    })),
   updateDiscount: (productId, discountAmount) =>
     set((state) => ({
       cart: state.cart.map((item) =>
@@ -74,4 +116,3 @@ export const usePosStore = create<PosStore>((set) => ({
     })),
   clearCart: () => set({ cart: [] }),
 }));
-

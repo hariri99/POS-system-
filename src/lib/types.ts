@@ -3,6 +3,7 @@ export type SessionMode = "supabase" | "demo";
 export type PaymentMethod = "cash" | "card" | "bank_transfer" | "mixed";
 export type PaymentStatus = "paid" | "pending" | "refunded" | "void";
 export type SaleStatus = "completed" | "cancelled" | "draft";
+export type ProductPricingTier = "retail" | "wholesale" | "discount";
 export type StockMovementType =
   | "restock"
   | "sale"
@@ -10,6 +11,17 @@ export type StockMovementType =
   | "return"
   | "void";
 export type AlertSeverity = "info" | "warning" | "critical";
+export type ExpenseCategory =
+  | "rent"
+  | "salary"
+  | "electricity"
+  | "delivery"
+  | "imports"
+  | "customs"
+  | "packaging"
+  | "marketing"
+  | "maintenance"
+  | "other";
 
 export interface AppSession {
   userId: string;
@@ -59,6 +71,8 @@ export interface ProductRecord {
   sku: string;
   barcode: string;
   salePrice: number;
+  wholesalePrice: number;
+  discountPrice: number | null;
   costPrice: number;
   stockQuantity: number;
   reorderPoint: number;
@@ -93,8 +107,11 @@ export interface SaleItemRecord {
   barcode: string;
   quantity: number;
   unitPrice: number;
+  pricingTier: ProductPricingTier;
+  unitCost: number;
   discountAmount: number;
   lineTotal: number;
+  lineProfit: number;
 }
 
 export interface SaleRecord {
@@ -131,6 +148,18 @@ export interface EmployeeRecord {
   transactionCount: number;
 }
 
+export interface ExpenseRecord {
+  id: string;
+  branchId: string;
+  category: ExpenseCategory;
+  label: string;
+  amount: number;
+  notes: string;
+  incurredOn: string;
+  recurring: boolean;
+  createdAt: string;
+}
+
 export interface AlertRecord {
   id: string;
   severity: AlertSeverity;
@@ -149,12 +178,17 @@ export interface DailySalesPoint {
 
 export interface DashboardSummary {
   todayRevenue: number;
+  todayNetProfit: number;
   todayTransactions: number;
   averageBasket: number;
   activeSkus: number;
   lowStockCount: number;
   expiringSoonCount: number;
   pendingPayments: number;
+  weeklyProfit: number;
+  monthlyProfit: number;
+  inventoryValue: number;
+  totalExpenses: number;
 }
 
 export interface DashboardSnapshot {
@@ -165,6 +199,7 @@ export interface DashboardSnapshot {
   sales: SaleRecord[];
   employees: EmployeeRecord[];
   suppliers: SupplierRecord[];
+  expenses: ExpenseRecord[];
   alerts: AlertRecord[];
   stockMovements: StockMovementRecord[];
   categories: CategoryRecord[];
@@ -177,6 +212,11 @@ export interface PosCartLine {
   sku: string;
   barcode: string;
   unitPrice: number;
+  pricingTier: ProductPricingTier;
+  retailPrice: number;
+  wholesalePrice: number;
+  discountPrice: number | null;
+  costPrice: number;
   quantity: number;
   discountAmount: number;
   stockQuantity: number;
@@ -187,6 +227,7 @@ export interface PosSaleInput {
     productId: string;
     quantity: number;
     unitPrice: number;
+    pricingTier: ProductPricingTier;
     discountAmount: number;
   }>;
   paymentMethod: PaymentMethod;
@@ -208,6 +249,8 @@ export interface ProductMutationInput {
   sku: string;
   barcode: string;
   salePrice: number;
+  wholesalePrice: number;
+  discountPrice?: number | null;
   costPrice: number;
   stockQuantity: number;
   reorderPoint: number;

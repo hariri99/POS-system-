@@ -17,6 +17,7 @@ import {
   type CategoryRecord,
   type DashboardSnapshot,
   type EmployeeRecord,
+  type ExpenseRecord,
   type InventoryAdjustmentInput,
   type PosSaleInput,
   type ProductMutationInput,
@@ -25,6 +26,7 @@ import {
   type StockMovementRecord,
   type SupplierRecord,
 } from "@/lib/types";
+import { buildDashboardSummary } from "@/lib/reporting";
 
 function mapProduct(row: Record<string, unknown>): ProductRecord {
   return {
@@ -43,6 +45,8 @@ function mapProduct(row: Record<string, unknown>): ProductRecord {
     sku: String(row.sku ?? ""),
     barcode: String(row.barcode ?? ""),
     salePrice: Number(row.sale_price ?? 0),
+    wholesalePrice: Number(row.wholesale_price ?? row.sale_price ?? 0),
+    discountPrice: row.discount_price == null ? null : Number(row.discount_price),
     costPrice: Number(row.cost_price ?? 0),
     stockQuantity: Number(row.stock_quantity ?? 0),
     reorderPoint: Number(row.reorder_point ?? 0),
@@ -118,6 +122,20 @@ function mapAlert(row: Record<string, unknown>): AlertRecord {
   };
 }
 
+function mapExpense(row: Record<string, unknown>): ExpenseRecord {
+  return {
+    id: String(row.id),
+    branchId: String(row.branch_id),
+    category: row.category as ExpenseRecord["category"],
+    label: String(row.label),
+    amount: Number(row.amount ?? 0),
+    notes: String(row.notes ?? ""),
+    incurredOn: String(row.incurred_on),
+    recurring: Boolean(row.recurring),
+    createdAt: String(row.created_at),
+  };
+}
+
 function mapStockMovement(row: Record<string, unknown>): StockMovementRecord {
   return {
     id: String(row.id),
@@ -149,6 +167,7 @@ async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapsh
     suppliersResult,
     alertsResult,
     movementsResult,
+    expensesResult,
     categoriesResult,
     brandsResult,
     trendResult,
@@ -162,8 +181,7 @@ async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapsh
       .from("sales_overview_view")
       .select("*")
       .eq("branch_id", session.branchId)
-      .order("created_at", { ascending: false })
-      .limit(20),
+      .order("created_at", { ascending: false }),
     supabase!
       .from("employee_performance_view")
       .select("*")
@@ -185,6 +203,11 @@ async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapsh
       .eq("branch_id", session.branchId)
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase!
+      .from("operating_expenses")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("incurred_on", { ascending: false }),
     supabase!.from("categories").select("id, name, slug").order("name"),
     supabase!.from("brands").select("id, name").order("name"),
     supabase!
@@ -201,6 +224,7 @@ async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapsh
   const suppliers = (suppliersResult.data ?? []).map((row) => mapSupplier(row));
   const alerts = (alertsResult.data ?? []).map((row) => mapAlert(row));
   const stockMovements = (movementsResult.data ?? []).map((row) => mapStockMovement(row));
+  const expenses = (expensesResult.data ?? []).map((row) => mapExpense(row));
   const categories = (categoriesResult.data ?? []) as CategoryRecord[];
   const brands = (brandsResult.data ?? []) as BrandRecord[];
   const salesTrend =
@@ -212,34 +236,21 @@ async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapsh
       transactions: Number(row.transactions ?? 0),
     })) ?? getDailySalesPoints();
 
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const todaySales = sales.filter((sale) => sale.createdAt.slice(0, 10) === todayKey);
-  const todayRevenue = todaySales.reduce((sum, sale) => sum + sale.totalAmount, 0);
-  const todayTransactions = todaySales.length;
+  const summary = buildDashboardSummary({
+    products,
+    sales,
+    expenses,
+  });
 
   return {
     session,
-    summary: {
-      todayRevenue,
-      todayTransactions,
-      averageBasket: todayTransactions ? todayRevenue / todayTransactions : 0,
-      activeSkus: products.filter((product) => product.isActive).length,
-      lowStockCount: products.filter((product) => product.stockQuantity <= product.reorderPoint)
-        .length,
-      expiringSoonCount: products.filter((product) => {
-        if (!product.expiryDate) {
-          return false;
-        }
-
-        return new Date(product.expiryDate) <= addDays(new Date(), 30);
-      }).length,
-      pendingPayments: sales.filter((sale) => sale.paymentStatus === "pending").length,
-    },
+    summary,
     salesTrend,
     products,
     sales,
     employees,
     suppliers,
+    expenses,
     alerts,
     stockMovements,
     categories,
@@ -266,7 +277,13 @@ export async function createSale(input: PosSaleInput, session: AppSession) {
     p_customer_name: input.customerName ?? null,
     p_discount_amount: input.discountAmount ?? 0,
     p_employee_id: session.userId,
-    p_items: input.items,
+    p_items: input.items.map((item) => ({
+      product_id: item.productId,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      pricing_tier: item.pricingTier,
+      discount_amount: item.discountAmount,
+    })),
     p_notes: input.notes ?? null,
     p_payment_method: input.paymentMethod,
   });
@@ -332,6 +349,8 @@ export async function mutateProduct(input: ProductMutationInput, session: AppSes
     sku: input.sku,
     barcode: input.barcode,
     sale_price: input.salePrice,
+    wholesale_price: input.wholesalePrice,
+    discount_price: input.discountPrice ?? null,
     cost_price: input.costPrice,
     expiry_date: input.expiryDate ?? null,
     image_url: input.imageUrl ?? null,

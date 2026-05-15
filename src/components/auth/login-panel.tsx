@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircle, ShieldCheck } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -62,7 +62,7 @@ export function LoginPanel({ isSupabaseEnabled }: { isSupabaseEnabled: boolean }
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.08fr_0.92fr]">
+    <div className="mx-auto w-full max-w-[640px]">
       <Card className="space-y-6">
         <div className="space-y-3">
           <div className="inline-flex rounded-xl border border-[var(--border-accent)] bg-[var(--brand-surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-[var(--brand)]">
@@ -119,40 +119,6 @@ export function LoginPanel({ isSupabaseEnabled }: { isSupabaseEnabled: boolean }
             {error}
           </div>
         ) : null}
-      </Card>
-
-      <Card className="space-y-5">
-        <div className="inline-flex size-12 items-center justify-center rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] text-[var(--brand)]">
-          <ShieldCheck className="size-6" />
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold text-[var(--heading)]">Deployment-ready authentication</h2>
-          <p className="mt-2 text-sm leading-7 text-[var(--muted-foreground)]">
-            This project is wired for Supabase Auth and PostgreSQL row-level security. When
-            environment keys are absent, demo mode keeps the management platform explorable.
-          </p>
-        </div>
-        <div className="surface-card-strong rounded-[18px] p-4 text-sm text-[var(--muted-foreground)]">
-          {isSupabaseEnabled ? (
-            <>
-              <p className="font-semibold text-[var(--heading)]">Live authentication mode</p>
-              <p className="mt-2">Create your first real admin account with:</p>
-              <p className="mt-2 font-medium text-[var(--heading)]">
-                `npm run create:admin -- --email owner@example.com --password YourStrongPassword123! --name &quot;Owner Name&quot;`
-              </p>
-              <p className="mt-4">Then sign in here with the same email and password.</p>
-            </>
-          ) : (
-            <>
-              <p className="font-semibold text-[var(--heading)]">Demo credentials</p>
-              <p className="mt-2">Admin: `admin@protein.local`</p>
-              <p>Password: `password123`</p>
-              <p className="mt-4">
-                Employee access is restricted to the POS terminal and cashier-safe operational views.
-              </p>
-            </>
-          )}
-        </div>
       </Card>
     </div>
   );

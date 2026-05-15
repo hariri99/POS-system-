@@ -1,4 +1,4 @@
-import { addDays, subDays } from "date-fns";
+import { addDays, startOfMonth, subDays } from "date-fns";
 import { nanoid } from "nanoid";
 import {
   type AlertRecord,
@@ -8,22 +8,26 @@ import {
   type DailySalesPoint,
   type DashboardSnapshot,
   type EmployeeRecord,
+  type ExpenseRecord,
   type InventoryAdjustmentInput,
   type PosSaleInput,
   type ProductMutationInput,
   type ProductRecord,
+  type ProductPricingTier,
   type SaleItemRecord,
   type SaleRecord,
   type StockMovementRecord,
   type SupplierRecord,
 } from "@/lib/types";
 import { createInvoiceNumber, slugify } from "@/lib/utils";
+import { buildDashboardSummary } from "@/lib/reporting";
 
 interface DemoStore {
   sessions: Record<string, AppSession>;
   categories: CategoryRecord[];
   brands: BrandRecord[];
   suppliers: SupplierRecord[];
+  expenses: ExpenseRecord[];
   employees: EmployeeRecord[];
   products: ProductRecord[];
   stockMovements: StockMovementRecord[];
@@ -44,6 +48,18 @@ function nowIso() {
 
 function normalizeBrandName(name: string) {
   return name.trim().replace(/\s+/g, " ");
+}
+
+function resolveTierPrice(product: ProductRecord, pricingTier: ProductPricingTier) {
+  if (pricingTier === "wholesale") {
+    return product.wholesalePrice;
+  }
+
+  if (pricingTier === "discount" && product.discountPrice != null) {
+    return product.discountPrice;
+  }
+
+  return product.salePrice;
 }
 
 function createStore(): DemoStore {
@@ -135,6 +151,8 @@ function createStore(): DemoStore {
       sku: "WHEY-ISO-5LB-CHO",
       barcode: "6281001000101",
       salePrice: 79,
+      wholesalePrice: 68,
+      discountPrice: 72,
       costPrice: 54,
       stockQuantity: 18,
       reorderPoint: 8,
@@ -162,6 +180,8 @@ function createStore(): DemoStore {
       sku: "WHEY-ISO-2LB-VAN",
       barcode: "6281001000102",
       salePrice: 42,
+      wholesalePrice: 36,
+      discountPrice: 39,
       costPrice: 28,
       stockQuantity: 11,
       reorderPoint: 6,
@@ -189,6 +209,8 @@ function createStore(): DemoStore {
       sku: "PRE-RAW-30-BLU",
       barcode: "6281001000201",
       salePrice: 36,
+      wholesalePrice: 29,
+      discountPrice: 32,
       costPrice: 21,
       stockQuantity: 7,
       reorderPoint: 8,
@@ -216,6 +238,8 @@ function createStore(): DemoStore {
       sku: "VITA-CORE-90",
       barcode: "6281001000301",
       salePrice: 24,
+      wholesalePrice: 20,
+      discountPrice: 21,
       costPrice: 12,
       stockQuantity: 27,
       reorderPoint: 10,
@@ -243,6 +267,8 @@ function createStore(): DemoStore {
       sku: "BAR-PRIME-12-CP",
       barcode: "6281001000401",
       salePrice: 28,
+      wholesalePrice: 22,
+      discountPrice: 24,
       costPrice: 17,
       stockQuantity: 4,
       reorderPoint: 6,
@@ -282,8 +308,11 @@ function createStore(): DemoStore {
           barcode: "6281001000101",
           quantity: 1,
           unitPrice: 79,
+          pricingTier: "retail",
+          unitCost: 54,
           discountAmount: 4,
           lineTotal: 75,
+          lineProfit: 21,
         },
         {
           id: "line-002",
@@ -293,8 +322,11 @@ function createStore(): DemoStore {
           barcode: "6281001000201",
           quantity: 1,
           unitPrice: 36,
+          pricingTier: "retail",
+          unitCost: 21,
           discountAmount: 2,
           lineTotal: 34,
+          lineProfit: 13,
         },
         {
           id: "line-003",
@@ -304,8 +336,11 @@ function createStore(): DemoStore {
           barcode: "6281001000301",
           quantity: 1,
           unitPrice: 24,
+          pricingTier: "retail",
+          unitCost: 12,
           discountAmount: 0,
           lineTotal: 24,
+          lineProfit: 12,
         },
       ],
     },
@@ -334,10 +369,317 @@ function createStore(): DemoStore {
           barcode: "6281001000102",
           quantity: 2,
           unitPrice: 42,
+          pricingTier: "retail",
+          unitCost: 28,
           discountAmount: 0,
           lineTotal: 84,
+          lineProfit: 28,
         },
       ],
+    },
+    {
+      id: "sale-003",
+      branchId,
+      invoiceNumber: createInvoiceNumber(3),
+      employeeId: "user-admin",
+      employeeName: "Rita Manager",
+      status: "completed",
+      paymentMethod: "bank_transfer",
+      paymentStatus: "paid",
+      subtotal: 244,
+      discountAmount: 0,
+      taxAmount: 0,
+      totalAmount: 244,
+      notes: "Gym wholesale replenishment.",
+      customerName: "Titan Gym",
+      createdAt: subDays(new Date(), 18).toISOString(),
+      items: [
+        {
+          id: "line-005",
+          productId: "prod-gold-whey",
+          productName: "Gold Whey Isolate",
+          sku: "WHEY-ISO-5LB-CHO",
+          barcode: "6281001000101",
+          quantity: 3,
+          unitPrice: 68,
+          pricingTier: "wholesale",
+          unitCost: 54,
+          discountAmount: 0,
+          lineTotal: 204,
+          lineProfit: 42,
+        },
+        {
+          id: "line-006",
+          productId: "prod-vita-core",
+          productName: "Performance Multivitamin",
+          sku: "VITA-CORE-90",
+          barcode: "6281001000301",
+          quantity: 2,
+          unitPrice: 20,
+          pricingTier: "wholesale",
+          unitCost: 12,
+          discountAmount: 0,
+          lineTotal: 40,
+          lineProfit: 16,
+        },
+      ],
+    },
+    {
+      id: "sale-004",
+      branchId,
+      invoiceNumber: createInvoiceNumber(4),
+      employeeId: "user-employee",
+      employeeName: "Omar Cashier",
+      status: "completed",
+      paymentMethod: "cash",
+      paymentStatus: "paid",
+      subtotal: 88,
+      discountAmount: 4,
+      taxAmount: 0,
+      totalAmount: 84,
+      notes: "Weekend in-store promo.",
+      customerName: "Lina A.",
+      createdAt: subDays(new Date(), 35).toISOString(),
+      items: [
+        {
+          id: "line-007",
+          productId: "prod-bar-prime",
+          productName: "Prime Crunch Protein Bar",
+          sku: "BAR-PRIME-12-CP",
+          barcode: "6281001000401",
+          quantity: 2,
+          unitPrice: 24,
+          pricingTier: "discount",
+          unitCost: 17,
+          discountAmount: 0,
+          lineTotal: 48,
+          lineProfit: 14,
+        },
+        {
+          id: "line-008",
+          productId: "prod-raw-pre",
+          productName: "Nitro Surge Pre-Workout",
+          sku: "PRE-RAW-30-BLU",
+          barcode: "6281001000201",
+          quantity: 1,
+          unitPrice: 32,
+          pricingTier: "discount",
+          unitCost: 21,
+          discountAmount: 0,
+          lineTotal: 32,
+          lineProfit: 11,
+        },
+        {
+          id: "line-009",
+          productId: "prod-vita-core",
+          productName: "Performance Multivitamin",
+          sku: "VITA-CORE-90",
+          barcode: "6281001000301",
+          quantity: 1,
+          unitPrice: 24,
+          pricingTier: "retail",
+          unitCost: 12,
+          discountAmount: 0,
+          lineTotal: 24,
+          lineProfit: 12,
+        },
+      ],
+    },
+    {
+      id: "sale-005",
+      branchId,
+      invoiceNumber: createInvoiceNumber(5),
+      employeeId: "user-employee",
+      employeeName: "Omar Cashier",
+      status: "completed",
+      paymentMethod: "card",
+      paymentStatus: "paid",
+      subtotal: 126,
+      discountAmount: 6,
+      taxAmount: 0,
+      totalAmount: 120,
+      notes: "Bundle for recurring customer.",
+      customerName: "Mazen K.",
+      createdAt: subDays(new Date(), 52).toISOString(),
+      items: [
+        {
+          id: "line-010",
+          productId: "prod-gold-whey-vanilla",
+          productName: "Gold Whey Isolate",
+          sku: "WHEY-ISO-2LB-VAN",
+          barcode: "6281001000102",
+          quantity: 3,
+          unitPrice: 42,
+          pricingTier: "retail",
+          unitCost: 28,
+          discountAmount: 6,
+          lineTotal: 120,
+          lineProfit: 36,
+        },
+      ],
+    },
+    {
+      id: "sale-006",
+      branchId,
+      invoiceNumber: createInvoiceNumber(6),
+      employeeId: "user-admin",
+      employeeName: "Rita Manager",
+      status: "completed",
+      paymentMethod: "bank_transfer",
+      paymentStatus: "paid",
+      subtotal: 166,
+      discountAmount: 0,
+      taxAmount: 0,
+      totalAmount: 166,
+      notes: "Wholesale vitamins and bars order.",
+      customerName: "Powerhouse Fitness",
+      createdAt: subDays(new Date(), 83).toISOString(),
+      items: [
+        {
+          id: "line-011",
+          productId: "prod-vita-core",
+          productName: "Performance Multivitamin",
+          sku: "VITA-CORE-90",
+          barcode: "6281001000301",
+          quantity: 5,
+          unitPrice: 20,
+          pricingTier: "wholesale",
+          unitCost: 12,
+          discountAmount: 0,
+          lineTotal: 100,
+          lineProfit: 40,
+        },
+        {
+          id: "line-012",
+          productId: "prod-bar-prime",
+          productName: "Prime Crunch Protein Bar",
+          sku: "BAR-PRIME-12-CP",
+          barcode: "6281001000401",
+          quantity: 3,
+          unitPrice: 22,
+          pricingTier: "wholesale",
+          unitCost: 17,
+          discountAmount: 0,
+          lineTotal: 66,
+          lineProfit: 15,
+        },
+      ],
+    },
+    {
+      id: "sale-007",
+      branchId,
+      invoiceNumber: createInvoiceNumber(7),
+      employeeId: "user-employee",
+      employeeName: "Omar Cashier",
+      status: "completed",
+      paymentMethod: "cash",
+      paymentStatus: "paid",
+      subtotal: 111,
+      discountAmount: 3,
+      taxAmount: 0,
+      totalAmount: 108,
+      notes: "Back-to-gym promotion.",
+      customerName: "Sara N.",
+      createdAt: subDays(new Date(), 110).toISOString(),
+      items: [
+        {
+          id: "line-013",
+          productId: "prod-gold-whey",
+          productName: "Gold Whey Isolate",
+          sku: "WHEY-ISO-5LB-CHO",
+          barcode: "6281001000101",
+          quantity: 1,
+          unitPrice: 72,
+          pricingTier: "discount",
+          unitCost: 54,
+          discountAmount: 0,
+          lineTotal: 72,
+          lineProfit: 18,
+        },
+        {
+          id: "line-014",
+          productId: "prod-raw-pre",
+          productName: "Nitro Surge Pre-Workout",
+          sku: "PRE-RAW-30-BLU",
+          barcode: "6281001000201",
+          quantity: 1,
+          unitPrice: 36,
+          pricingTier: "retail",
+          unitCost: 21,
+          discountAmount: 3,
+          lineTotal: 33,
+          lineProfit: 12,
+        },
+      ],
+    },
+  ];
+
+  const expenses: ExpenseRecord[] = [
+    {
+      id: "exp-001",
+      branchId,
+      category: "rent",
+      label: "Shop rent",
+      amount: 1800,
+      notes: "Main branch monthly rent",
+      incurredOn: startOfMonth(new Date()).toISOString(),
+      recurring: true,
+      createdAt: nowIso(),
+    },
+    {
+      id: "exp-002",
+      branchId,
+      category: "salary",
+      label: "Staff salaries",
+      amount: 1250,
+      notes: "Monthly payroll allocation",
+      incurredOn: startOfMonth(new Date()).toISOString(),
+      recurring: true,
+      createdAt: nowIso(),
+    },
+    {
+      id: "exp-003",
+      branchId,
+      category: "electricity",
+      label: "Electricity and internet",
+      amount: 220,
+      notes: "Utilities for the current month",
+      incurredOn: subDays(new Date(), 5).toISOString(),
+      recurring: true,
+      createdAt: nowIso(),
+    },
+    {
+      id: "exp-004",
+      branchId,
+      category: "imports",
+      label: "Import forwarding",
+      amount: 640,
+      notes: "Protein shipment clearance",
+      incurredOn: subDays(new Date(), 26).toISOString(),
+      recurring: false,
+      createdAt: nowIso(),
+    },
+    {
+      id: "exp-005",
+      branchId,
+      category: "delivery",
+      label: "Courier and local delivery",
+      amount: 145,
+      notes: "Same-day store delivery support",
+      incurredOn: subDays(new Date(), 11).toISOString(),
+      recurring: false,
+      createdAt: nowIso(),
+    },
+    {
+      id: "exp-006",
+      branchId,
+      category: "customs",
+      label: "Customs fees",
+      amount: 520,
+      notes: "Recent import customs payment",
+      incurredOn: subDays(new Date(), 63).toISOString(),
+      recurring: false,
+      createdAt: nowIso(),
     },
   ];
 
@@ -429,6 +771,7 @@ function createStore(): DemoStore {
     categories,
     brands,
     suppliers,
+    expenses,
     employees,
     products,
     stockMovements,
@@ -450,53 +793,41 @@ export function getDemoSession(role: "admin" | "employee") {
 }
 
 export function getDailySalesPoints(): DailySalesPoint[] {
-  const seed = [
-    { label: "Mon", revenue: 420, transactions: 9 },
-    { label: "Tue", revenue: 510, transactions: 11 },
-    { label: "Wed", revenue: 620, transactions: 14 },
-    { label: "Thu", revenue: 575, transactions: 12 },
-    { label: "Fri", revenue: 880, transactions: 18 },
-    { label: "Sat", revenue: 940, transactions: 20 },
-    { label: "Sun", revenue: 630, transactions: 13 },
-  ];
+  const store = getDemoStore();
+  const today = new Date();
 
-  return seed;
+  return Array.from({ length: 7 }, (_, index) => {
+    const targetDate = subDays(today, 6 - index);
+    const dayKey = targetDate.toISOString().slice(0, 10);
+    const daySales = store.sales.filter(
+      (sale) => sale.status === "completed" && sale.createdAt.slice(0, 10) === dayKey,
+    );
+
+    return {
+      label: targetDate.toLocaleDateString("en-US", { weekday: "short" }),
+      revenue: daySales.reduce((sum, sale) => sum + sale.totalAmount, 0),
+      transactions: daySales.length,
+    };
+  });
 }
 
 export function getDemoSnapshot(session: AppSession): DashboardSnapshot {
   const store = getDemoStore();
-  const todaySales = store.sales.filter(
-    (sale) => sale.createdAt.slice(0, 10) === new Date().toISOString().slice(0, 10),
-  );
-  const todayRevenue = todaySales.reduce((sum, sale) => sum + sale.totalAmount, 0);
-  const todayTransactions = todaySales.length;
-  const lowStockCount = store.products.filter(
-    (product) => product.stockQuantity <= product.reorderPoint,
-  ).length;
-  const expiringSoonCount = store.products.filter((product) => {
-    if (!product.expiryDate) {
-      return false;
-    }
-
-    return new Date(product.expiryDate) <= addDays(new Date(), 45);
-  }).length;
+  const summary = buildDashboardSummary({
+    products: store.products,
+    sales: store.sales,
+    expenses: store.expenses,
+  });
 
   return {
     session,
-    summary: {
-      todayRevenue,
-      todayTransactions,
-      averageBasket: todayTransactions ? todayRevenue / todayTransactions : 0,
-      activeSkus: store.products.filter((product) => product.isActive).length,
-      lowStockCount,
-      expiringSoonCount,
-      pendingPayments: store.sales.filter((sale) => sale.paymentStatus === "pending").length,
-    },
+    summary,
     salesTrend: getDailySalesPoints(),
     products: [...store.products],
     sales: [...store.sales].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     employees: [...store.employees],
     suppliers: [...store.suppliers],
+    expenses: [...store.expenses],
     alerts: [...store.alerts],
     stockMovements: [...store.stockMovements].sort((a, b) =>
       b.createdAt.localeCompare(a.createdAt),
@@ -568,6 +899,8 @@ export function upsertDemoProduct(input: ProductMutationInput) {
         sku: input.sku,
         barcode: input.barcode,
         salePrice: input.salePrice,
+        wholesalePrice: input.wholesalePrice,
+        discountPrice: input.discountPrice ?? null,
         costPrice: input.costPrice,
         stockQuantity: input.stockQuantity,
         reorderPoint: input.reorderPoint,
@@ -666,7 +999,11 @@ function buildSaleItems(input: PosSaleInput, store: DemoStore) {
       throw new Error(`Not enough stock for ${product.name}.`);
     }
 
-    const lineTotal = item.unitPrice * item.quantity - item.discountAmount;
+    const pricingTier = item.pricingTier ?? "retail";
+    const defaultPrice = resolveTierPrice(product, pricingTier);
+    const unitPrice = item.unitPrice || defaultPrice;
+    const lineTotal = unitPrice * item.quantity - item.discountAmount;
+    const lineProfit = lineTotal - product.costPrice * item.quantity;
 
     return {
       line: {
@@ -676,9 +1013,12 @@ function buildSaleItems(input: PosSaleInput, store: DemoStore) {
         sku: product.sku,
         barcode: product.barcode,
         quantity: item.quantity,
-        unitPrice: item.unitPrice,
+        unitPrice,
+        pricingTier,
+        unitCost: product.costPrice,
         discountAmount: item.discountAmount,
         lineTotal,
+        lineProfit,
       } satisfies SaleItemRecord,
       product,
     };

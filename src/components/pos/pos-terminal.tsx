@@ -22,6 +22,7 @@ export function PosTerminal({
   const addProduct = usePosStore((state) => state.addProduct);
   const removeProduct = usePosStore((state) => state.removeProduct);
   const updateQuantity = usePosStore((state) => state.updateQuantity);
+  const updatePricingTier = usePosStore((state) => state.updatePricingTier);
   const updateDiscount = usePosStore((state) => state.updateDiscount);
   const clearCart = usePosStore((state) => state.clearCart);
   const [query, setQuery] = useState("");
@@ -66,6 +67,7 @@ export function PosTerminal({
             productId: item.productId,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
+            pricingTier: item.pricingTier,
             discountAmount: item.discountAmount,
           })),
           paymentMethod,
@@ -166,15 +168,20 @@ export function PosTerminal({
                   <span className="text-lg font-semibold text-white">
                     {formatCurrency(product.salePrice)}
                   </span>
-                  <span
-                    className={`status-pill ${
-                      product.stockQuantity <= product.reorderPoint
-                        ? "border-amber-500/20 bg-amber-500/12 text-amber-200"
-                        : "border-white/10 bg-white/[0.04] text-[var(--muted-foreground)]"
-                    }`}
-                  >
-                    {product.stockQuantity} in stock
-                  </span>
+                  <div className="text-right">
+                    <span
+                      className={`status-pill ${
+                        product.stockQuantity <= product.reorderPoint
+                          ? "border-amber-500/20 bg-amber-500/12 text-amber-200"
+                          : "border-white/10 bg-white/[0.04] text-[var(--muted-foreground)]"
+                      }`}
+                    >
+                      {product.stockQuantity} in stock
+                    </span>
+                    <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                      Wholesale {formatCurrency(product.wholesalePrice)}
+                    </p>
+                  </div>
                 </div>
               </button>
             ))}
@@ -238,7 +245,9 @@ export function PosTerminal({
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
                   <p className="font-medium text-white">{item.name}</p>
-                  <p className="text-xs text-[var(--muted-foreground)]">{formatCurrency(item.unitPrice)} each</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    {formatCurrency(item.unitPrice)} each / Cost {formatCurrency(item.costPrice)}
+                  </p>
                 </div>
                 <Button
                   variant="ghost"
@@ -248,38 +257,72 @@ export function PosTerminal({
                   <Trash2 className="size-4" />
                 </Button>
               </div>
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    className="size-9 px-0"
-                    onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                  >
-                    <Minus className="size-4" />
-                  </Button>
-                  <span className="min-w-8 text-center font-semibold text-white">{item.quantity}</span>
-                  <Button
-                    variant="secondary"
-                    className="size-9 px-0"
-                    onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                  >
-                    <Plus className="size-4" />
-                  </Button>
+              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="field-label">Pricing tier</span>
+                    <Select
+                      value={item.pricingTier}
+                      onChange={(event) =>
+                        updatePricingTier(
+                          item.productId,
+                          event.target.value as "retail" | "wholesale" | "discount",
+                        )
+                      }
+                    >
+                      <option value="retail">Retail</option>
+                      <option value="wholesale">Wholesale</option>
+                      <option value="discount" disabled={item.discountPrice == null}>
+                        Discount
+                      </option>
+                    </Select>
+                  </label>
+                  <label className="space-y-2">
+                    <span className="field-label">Line discount</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      placeholder="Discount"
+                      value={item.discountAmount}
+                      onChange={(event) =>
+                        updateDiscount(item.productId, Number(event.target.value || 0))
+                      }
+                    />
+                  </label>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Input
-                    className="w-28"
-                    type="number"
-                    min="0"
-                    placeholder="Discount"
-                    value={item.discountAmount}
-                    onChange={(event) =>
-                      updateDiscount(item.productId, Number(event.target.value || 0))
-                    }
-                  />
-                  <span className="min-w-24 text-right font-semibold text-white">
-                    {formatCurrency(item.quantity * item.unitPrice - item.discountAmount)}
-                  </span>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      className="size-9 px-0"
+                      onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                    >
+                      <Minus className="size-4" />
+                    </Button>
+                    <span className="min-w-8 text-center font-semibold text-white">
+                      {item.quantity}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      className="size-9 px-0"
+                      onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                    >
+                      <Plus className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="text-right">
+                    <p className="min-w-24 font-semibold text-white">
+                      {formatCurrency(item.quantity * item.unitPrice - item.discountAmount)}
+                    </p>
+                    <p className="text-xs text-[var(--muted-foreground)]">
+                      Profit{" "}
+                      {formatCurrency(
+                        item.quantity * item.unitPrice -
+                          item.discountAmount -
+                          item.quantity * item.costPrice,
+                      )}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

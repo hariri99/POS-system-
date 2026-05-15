@@ -1,13 +1,22 @@
 "use client";
 
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Area,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 
 export function SalesOverviewChart({
   data,
 }: {
-  data: Array<{ label: string; revenue: number; transactions: number }>;
+  data: Array<{ label: string; revenue: number; transactions: number; netProfit?: number }>;
 }) {
   return (
     <Card className="space-y-6">
@@ -21,7 +30,7 @@ export function SalesOverviewChart({
       </div>
       <div className="h-[280px] min-w-0">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data}>
+          <ComposedChart data={data}>
             <defs>
               <linearGradient id="revenue" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="var(--brand)" stopOpacity={0.26} />
@@ -50,7 +59,15 @@ export function SalesOverviewChart({
               }}
               formatter={(value, name) => {
                 const numericValue = typeof value === "number" ? value : Number(value ?? 0);
-                return name === "revenue" ? formatCurrency(numericValue) : `${numericValue} tx`;
+                if (name === "revenue") {
+                  return formatCurrency(numericValue);
+                }
+
+                if (name === "netProfit") {
+                  return formatCurrency(numericValue);
+                }
+
+                return `${numericValue} tx`;
               }}
             />
             <Area
@@ -61,7 +78,16 @@ export function SalesOverviewChart({
               fill="url(#revenue)"
               strokeWidth={2.5}
             />
-          </AreaChart>
+            {data.some((point) => typeof point.netProfit === "number") ? (
+              <Line
+                type="monotone"
+                dataKey="netProfit"
+                stroke="var(--brand-strong)"
+                strokeWidth={2.25}
+                dot={false}
+              />
+            ) : null}
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
     </Card>

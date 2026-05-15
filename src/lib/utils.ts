@@ -14,6 +14,13 @@ export function formatCurrency(value: number) {
   }).format(value);
 }
 
+export function formatPercent(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "percent",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 export function formatDate(date: string | null) {
   if (!date) {
     return "N/A";

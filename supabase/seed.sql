@@ -41,6 +41,8 @@ insert into public.products (
   sku,
   barcode,
   sale_price,
+  wholesale_price,
+  discount_price,
   cost_price,
   expiry_date,
   image_url,
@@ -60,6 +62,8 @@ values
     'WHEY-ISO-5LB-CHO',
     '6281001000101',
     79,
+    68,
+    72,
     54,
     current_date + 220,
     'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=600&q=80',
@@ -78,6 +82,8 @@ values
     'PRE-RAW-30-BLU',
     '6281001000201',
     36,
+    29,
+    32,
     21,
     current_date + 85,
     'https://images.unsplash.com/photo-1604480133435-25b86862d276?auto=format&fit=crop&w=600&q=80',
@@ -96,6 +102,8 @@ values
     'VITA-CORE-90',
     '6281001000301',
     24,
+    20,
+    21,
     12,
     current_date + 45,
     'https://images.unsplash.com/photo-1587854692152-cbe660dbde88?auto=format&fit=crop&w=600&q=80',
@@ -116,3 +124,56 @@ values
   ('11111111-1111-4111-8111-111111111111', '55555555-5555-4555-8555-555555555552', 7, 0, 8, timezone('utc', now()) - interval '11 days'),
   ('11111111-1111-4111-8111-111111111111', '55555555-5555-4555-8555-555555555553', 27, 0, 10, timezone('utc', now()) - interval '4 days')
 on conflict (branch_id, product_id) do nothing;
+
+insert into public.operating_expenses (
+  id,
+  branch_id,
+  category,
+  label,
+  amount,
+  notes,
+  incurred_on,
+  recurring
+)
+values
+  (
+    '66666666-6666-4666-8666-666666666661',
+    '11111111-1111-4111-8111-111111111111',
+    'rent',
+    'Main branch rent',
+    1800,
+    'Monthly shop rent',
+    current_date - 1,
+    true
+  ),
+  (
+    '66666666-6666-4666-8666-666666666662',
+    '11111111-1111-4111-8111-111111111111',
+    'salary',
+    'Store salaries',
+    1250,
+    'Monthly payroll allocation',
+    current_date - 2,
+    true
+  ),
+  (
+    '66666666-6666-4666-8666-666666666663',
+    '11111111-1111-4111-8111-111111111111',
+    'electricity',
+    'Electricity and internet',
+    220,
+    'Utilities for the current month',
+    current_date - 5,
+    true
+  ),
+  (
+    '66666666-6666-4666-8666-666666666664',
+    '11111111-1111-4111-8111-111111111111',
+    'imports',
+    'Import forwarding',
+    640,
+    'Protein shipment clearance',
+    current_date - 26,
+    false
+  )
+on conflict (id) do nothing;

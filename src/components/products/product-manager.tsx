@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { type CategoryRecord, type ProductRecord, type SupplierRecord } from "@/lib/types";
-import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import { cn, formatCurrency, formatDate, formatPercent } from "@/lib/utils";
 
 interface ProductManagerProps {
   products: ProductRecord[];
@@ -43,6 +43,8 @@ type ProductFormState = {
   sku: string;
   barcode: string;
   salePrice: string;
+  wholesalePrice: string;
+  discountPrice: string;
   costPrice: string;
   stockQuantity: string;
   reorderPoint: string;
@@ -74,6 +76,8 @@ const initialForm: ProductFormState = {
   sku: "",
   barcode: "",
   salePrice: "0",
+  wholesalePrice: "0",
+  discountPrice: "",
   costPrice: "0",
   stockQuantity: "0",
   reorderPoint: "0",
@@ -95,6 +99,8 @@ function buildFormFromProduct(product: ProductRecord): ProductFormState {
     sku: product.sku,
     barcode: product.barcode,
     salePrice: String(product.salePrice),
+    wholesalePrice: String(product.wholesalePrice),
+    discountPrice: product.discountPrice != null ? String(product.discountPrice) : "",
     costPrice: String(product.costPrice),
     stockQuantity: String(product.stockQuantity),
     reorderPoint: String(product.reorderPoint),
@@ -488,6 +494,8 @@ export function ProductManager({
           body: JSON.stringify({
             ...form,
             salePrice: Number(form.salePrice),
+            wholesalePrice: Number(form.wholesalePrice),
+            discountPrice: form.discountPrice.trim() === "" ? null : Number(form.discountPrice),
             costPrice: Number(form.costPrice),
             stockQuantity: Number(form.stockQuantity),
             reorderPoint: Number(form.reorderPoint),
@@ -815,9 +823,24 @@ export function ProductManager({
                     </td>
                     <td>
                       <div className="space-y-1">
-                        <p className="font-medium text-[var(--heading)]">{formatCurrency(product.salePrice)}</p>
+                        <p className="font-medium text-[var(--heading)]">
+                          Retail {formatCurrency(product.salePrice)}
+                        </p>
                         <p className="text-xs text-[var(--muted-foreground)]">
-                          Cost {formatCurrency(product.costPrice)}
+                          Wholesale {formatCurrency(product.wholesalePrice)}
+                        </p>
+                        {product.discountPrice != null ? (
+                          <p className="text-xs text-[var(--muted-foreground)]">
+                            Discount {formatCurrency(product.discountPrice)}
+                          </p>
+                        ) : null}
+                        <p className="text-xs text-[var(--muted-foreground)]">
+                          Cost {formatCurrency(product.costPrice)} / Margin{" "}
+                          {formatPercent(
+                            product.salePrice > 0
+                              ? (product.salePrice - product.costPrice) / product.salePrice
+                              : 0,
+                          )}
                         </p>
                       </div>
                     </td>
@@ -1060,11 +1083,11 @@ export function ProductManager({
                     <DrawerSection
                       icon={<Wallet className="size-4" />}
                       title="Pricing"
-                      description="Set the customer price, base cost, and review gross margin at a glance."
+                      description="Define retail, wholesale, and optional discount pricing with a fast profit preview."
                     >
                       <div className="grid gap-4 sm:grid-cols-2">
                         <label className="space-y-2">
-                          <span className="field-label">Sale price</span>
+                          <span className="field-label">Retail price</span>
                           <Input
                             type="number"
                             min="0"
@@ -1073,6 +1096,33 @@ export function ProductManager({
                             onChange={(event) =>
                               setForm((state) => ({ ...state, salePrice: event.target.value }))
                             }
+                          />
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="field-label">Wholesale price</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={form.wholesalePrice}
+                            onChange={(event) =>
+                              setForm((state) => ({ ...state, wholesalePrice: event.target.value }))
+                            }
+                          />
+                        </label>
+
+                        <label className="space-y-2">
+                          <span className="field-label">Discount price</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={form.discountPrice}
+                            onChange={(event) =>
+                              setForm((state) => ({ ...state, discountPrice: event.target.value }))
+                            }
+                            placeholder="Optional promo price"
                           />
                         </label>
 
@@ -1089,13 +1139,37 @@ export function ProductManager({
                           />
                         </label>
 
-                        <div className="surface-card rounded-[18px] px-4 py-3 sm:col-span-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
-                            Gross margin preview
-                          </p>
-                          <p className="mt-2 text-lg font-semibold text-[var(--heading)]">
-                            {formatCurrency(Number(form.salePrice || 0) - Number(form.costPrice || 0))}
-                          </p>
+                        <div className="grid gap-3 sm:col-span-2 lg:grid-cols-3">
+                          <div className="surface-card rounded-[18px] px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                              Retail profit
+                            </p>
+                            <p className="mt-2 text-lg font-semibold text-[var(--heading)]">
+                              {formatCurrency(Number(form.salePrice || 0) - Number(form.costPrice || 0))}
+                            </p>
+                          </div>
+                          <div className="surface-card rounded-[18px] px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                              Wholesale profit
+                            </p>
+                            <p className="mt-2 text-lg font-semibold text-[var(--heading)]">
+                              {formatCurrency(
+                                Number(form.wholesalePrice || 0) - Number(form.costPrice || 0),
+                              )}
+                            </p>
+                          </div>
+                          <div className="surface-card rounded-[18px] px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+                              Discount profit
+                            </p>
+                            <p className="mt-2 text-lg font-semibold text-[var(--heading)]">
+                              {form.discountPrice.trim() === ""
+                                ? "Optional"
+                                : formatCurrency(
+                                    Number(form.discountPrice || 0) - Number(form.costPrice || 0),
+                                  )}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     </DrawerSection>
