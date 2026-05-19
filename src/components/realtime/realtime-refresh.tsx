@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect } from "react";
+import { startTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 export function RealtimeRefresh({
   channelName,
   tables,
+  refreshDebounceMs = 400,
 }: {
   channelName: string;
   tables: string[];
+  refreshDebounceMs?: number;
 }) {
   const router = useRouter();
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const supabase = createBrowserSupabaseClient();
@@ -30,7 +33,15 @@ export function RealtimeRefresh({
           table,
         },
         () => {
-          router.refresh();
+          if (refreshTimerRef.current) {
+            clearTimeout(refreshTimerRef.current);
+          }
+
+          refreshTimerRef.current = setTimeout(() => {
+            startTransition(() => {
+              router.refresh();
+            });
+          }, refreshDebounceMs);
         },
       );
     });
@@ -38,10 +49,12 @@ export function RealtimeRefresh({
     channel.subscribe();
 
     return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
       channel.unsubscribe();
     };
-  }, [channelName, router, tables]);
+  }, [channelName, refreshDebounceMs, router, tables]);
 
   return null;
 }
-

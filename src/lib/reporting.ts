@@ -6,6 +6,7 @@ import {
 } from "@/lib/sale-math";
 import {
   differenceInCalendarDays,
+  eachDayOfInterval,
   eachMonthOfInterval,
   endOfDay,
   endOfMonth,
@@ -39,6 +40,14 @@ type ResolvedLineMetrics = {
   pricingTier: ProductPricingTier;
 };
 
+type CategoryAccumulator = {
+  categoryName: string;
+  revenue: number;
+  netProfit: number;
+  unitsSold: number;
+  inventoryValue: number;
+};
+
 export interface ReportKpi {
   todayRevenue: number;
   todayNetProfit: number;
@@ -54,12 +63,14 @@ export interface ReportKpi {
 
 export interface ProfitTrendPoint {
   label: string;
+  fullLabel: string;
   revenue: number;
   netProfit: number;
 }
 
 export interface SalesTrendPoint {
   label: string;
+  fullLabel: string;
   revenue: number;
   netProfit: number;
   transactions: number;
@@ -84,6 +95,20 @@ export interface CategoryPerformancePoint {
   netProfit: number;
   unitsSold: number;
   inventoryValue: number;
+  marginRate: number;
+  profitShare: number;
+}
+
+export interface ExecutiveReport {
+  kpis: ReportKpi;
+  monthlyProfitTrend: ProfitTrendPoint[];
+  salesTrend: SalesTrendPoint[];
+  topProducts: ProductPerformancePoint[];
+  lowestMarginProducts: ProductPerformancePoint[];
+  categoryPerformance: CategoryPerformancePoint[];
+  expiryAlerts: ExpiryInsightPoint[];
+  lowStockIntelligence: LowStockInsightPoint[];
+  employeePerformance: EmployeePerformancePoint[];
 }
 
 export interface ExpiryInsightPoint {
@@ -111,35 +136,6 @@ export interface EmployeePerformancePoint {
   orders: number;
   revenue: number;
   netProfit: number;
-}
-
-export interface CustomerInsightPoint {
-  customerName: string;
-  orders: number;
-  revenue: number;
-  netProfit: number;
-}
-
-export interface ExpenseBreakdownPoint {
-  label: string;
-  amount: number;
-}
-
-export interface ExecutiveReport {
-  kpis: ReportKpi;
-  monthlyProfitTrend: ProfitTrendPoint[];
-  salesTrend: SalesTrendPoint[];
-  topProducts: ProductPerformancePoint[];
-  lowestMarginProducts: ProductPerformancePoint[];
-  categoryPerformance: CategoryPerformancePoint[];
-  expiryAlerts: ExpiryInsightPoint[];
-  lowStockIntelligence: LowStockInsightPoint[];
-  employeePerformance: EmployeePerformancePoint[];
-  topCustomers: CustomerInsightPoint[];
-  expenseBreakdown: ExpenseBreakdownPoint[];
-  retailSalesProfit: number;
-  wholesaleSalesProfit: number;
-  discountSalesProfit: number;
 }
 
 function getCompletedSales(sales: SaleRecord[]) {
@@ -173,12 +169,15 @@ function resolveLineMetrics(
 
       const product = productsById.get(item.productId);
       const fallbackCost = product?.costPrice ?? 0;
-      const unitCost = "unitCost" in item && typeof item.unitCost === "number" ? item.unitCost : fallbackCost;
+      const hasStoredFinancials =
+        (typeof item.unitCost === "number" && item.unitCost > 0) ||
+        (typeof item.lineProfit === "number" && item.lineProfit !== 0) ||
+        item.pricingTier !== "retail";
+      const unitCost = hasStoredFinancials ? item.unitCost : fallbackCost;
       const baseRevenue = getNetLineTotal(item);
-      const baseProfit =
-        "lineProfit" in item && typeof item.lineProfit === "number"
-          ? getNetLineProfit(item)
-          : baseRevenue - unitCost * quantity;
+      const baseProfit = hasStoredFinancials
+        ? getNetLineProfit(item)
+        : baseRevenue - unitCost * quantity;
 
       return {
         productId: item.productId,
@@ -246,7 +245,9 @@ export function buildDashboardSummary({
   const monthStart = startOfMonth(new Date());
   const monthEnd = endOfMonth(new Date());
 
-  const settledTodaySales = completedSales.filter((sale) => getSaleTimelineDate(sale) >= todayStart);
+  const settledTodaySales = completedSales.filter((sale) =>
+    isWithinInterval(getSaleTimelineDate(sale), { start: todayStart, end: todayEnd }),
+  );
   const weekSales = completedSales.filter((sale) =>
     isWithinInterval(getSaleTimelineDate(sale), { start: weekStart, end: weekEnd }),
   );
@@ -326,7 +327,7 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
   );
 
   const monthlyWindows = eachMonthOfInterval({
-    start: startOfMonth(subMonths(now, 5)),
+    start: startOfMonth(subMonths(now, 11)),
     end: currentMonthStart,
   });
 
@@ -347,39 +348,41 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
 
     return {
       label: format(monthDate, "MMM"),
+      fullLabel: format(monthDate, "MMMM yyyy"),
       revenue,
       netProfit: grossProfit - expenses,
     };
   });
 
-  const salesTrendDays = Array.from({ length: 14 }, (_, index) => startOfDay(subDays(now, 13 - index)));
+  const salesTrendDays = eachDayOfInterval({
+    start: currentMonthStart,
+    end: endOfMonth(now),
+  });
   const salesTrend = salesTrendDays.map((dayDate) => {
     const daySales = completedSales.filter((sale) =>
       startOfDay(getSaleTimelineDate(sale)).getTime() === dayDate.getTime(),
     );
     const revenue = daySales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0);
-    const netProfit = daySales.reduce(
+    const grossProfit = daySales.reduce(
       (sum, sale) =>
         sum +
         resolveLineMetrics(sale, productsById).reduce((lineSum, line) => lineSum + line.profit, 0),
       0,
     );
+    const expenses = sumExpensesInInterval(snapshot.expenses, startOfDay(dayDate), endOfDay(dayDate));
 
     return {
-      label: format(dayDate, "dd MMM"),
+      label: format(dayDate, "d"),
+      fullLabel: format(dayDate, "dd MMM yyyy"),
       revenue,
-      netProfit,
+      netProfit: grossProfit - expenses,
       transactions: daySales.length,
     };
   });
 
   const performanceByProduct = new Map<string, ProductPerformancePoint>();
-  const performanceByCategory = new Map<string, CategoryPerformancePoint>();
+  const performanceByCategory = new Map<string, CategoryAccumulator>();
   const performanceByEmployee = new Map<string, EmployeePerformancePoint>();
-  const performanceByCustomer = new Map<string, CustomerInsightPoint>();
-  let retailSalesProfit = 0;
-  let wholesaleSalesProfit = 0;
-  let discountSalesProfit = 0;
 
   completedSales.forEach((sale) => {
     const lines = resolveLineMetrics(sale, productsById);
@@ -396,19 +399,6 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     employeeBucket.revenue += getSaleNetTotal(sale);
     employeeBucket.netProfit += saleProfit;
     performanceByEmployee.set(sale.employeeId, employeeBucket);
-
-    if (sale.customerName) {
-      const customerBucket = performanceByCustomer.get(sale.customerName) ?? {
-        customerName: sale.customerName,
-        orders: 0,
-        revenue: 0,
-        netProfit: 0,
-      };
-      customerBucket.orders += 1;
-      customerBucket.revenue += getSaleNetTotal(sale);
-      customerBucket.netProfit += saleProfit;
-      performanceByCustomer.set(sale.customerName, customerBucket);
-    }
 
     lines.forEach((line) => {
       const productBucket = performanceByProduct.get(line.productId) ?? {
@@ -429,13 +419,10 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
       productBucket.netProfit += line.profit;
       if (line.pricingTier === "retail") {
         productBucket.retailRevenue += line.revenue;
-        retailSalesProfit += line.profit;
       } else if (line.pricingTier === "wholesale") {
         productBucket.wholesaleRevenue += line.revenue;
-        wholesaleSalesProfit += line.profit;
       } else {
         productBucket.discountRevenue += line.revenue;
-        discountSalesProfit += line.profit;
       }
 
       performanceByProduct.set(line.productId, productBucket);
@@ -478,18 +465,17 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     .filter((product) => product.unitsSold > 0)
     .sort((left, right) => left.marginRate - right.marginRate);
 
-  const categoryPerformance = Array.from(performanceByCategory.values()).sort(
-    (left, right) => right.netProfit - left.netProfit,
+  const totalCategoryProfit = Array.from(performanceByCategory.values()).reduce(
+    (sum, category) => sum + category.netProfit,
+    0,
   );
-
-  const expenseBreakdown = Array.from(
-    snapshot.expenses.reduce<Map<string, number>>((totals, expense) => {
-      totals.set(expense.category, (totals.get(expense.category) ?? 0) + expense.amount);
-      return totals;
-    }, new Map()),
-  )
-    .map(([label, amount]) => ({ label, amount }))
-    .sort((left, right) => right.amount - left.amount);
+  const categoryPerformance = Array.from(performanceByCategory.values())
+    .map((category) => ({
+      ...category,
+      marginRate: category.revenue > 0 ? category.netProfit / category.revenue : 0,
+      profitShare: totalCategoryProfit > 0 ? category.netProfit / totalCategoryProfit : 0,
+    }))
+    .sort((left, right) => right.netProfit - left.netProfit);
 
   const expiryAlerts = snapshot.products
     .filter((product) => product.expiryDate)
@@ -579,18 +565,11 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     salesTrend,
     topProducts: topProducts.slice(0, 8),
     lowestMarginProducts: lowestMarginProducts.slice(0, 8),
-    categoryPerformance: categoryPerformance.slice(0, 6),
+    categoryPerformance,
     expiryAlerts,
     lowStockIntelligence,
     employeePerformance: Array.from(performanceByEmployee.values()).sort(
       (left, right) => right.netProfit - left.netProfit,
     ),
-    topCustomers: Array.from(performanceByCustomer.values())
-      .sort((left, right) => right.netProfit - left.netProfit)
-      .slice(0, 5),
-    expenseBreakdown,
-    retailSalesProfit,
-    wholesaleSalesProfit,
-    discountSalesProfit,
   };
 }

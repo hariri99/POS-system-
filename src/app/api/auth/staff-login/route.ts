@@ -1,4 +1,5 @@
 import { apiError, apiSuccess } from "@/lib/api";
+import { setAppSessionCookie } from "@/lib/auth";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
 
   const { data: profiles, error: profileError } = await admin
     .from("profiles")
-    .select("email, role, status, full_name");
+    .select("id, email, role, status, full_name, branch_id, branches(name)");
 
   if (profileError) {
     return apiError("Unable to validate this staff account right now.", 500);
@@ -62,6 +63,18 @@ export async function POST(request: Request) {
   if (signInError) {
     return apiError("Invalid staff name or password.", 401);
   }
+
+  await setAppSessionCookie({
+    userId: String(profile.id),
+    email: String(profile.email),
+    fullName: String(profile.full_name ?? ""),
+    role: profile.role,
+    branchId: String(profile.branch_id ?? ""),
+    branchName: Array.isArray(profile.branches)
+      ? String(profile.branches[0]?.name ?? "Main Branch")
+      : String((profile.branches as { name?: string } | null)?.name ?? "Main Branch"),
+    mode: "supabase",
+  });
 
   return apiSuccess(
     {

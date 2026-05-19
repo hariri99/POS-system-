@@ -1,4 +1,5 @@
 import { addDays, startOfDay } from "date-fns";
+import { after } from "next/server";
 import { assertSupabaseConfigured } from "@/lib/env";
 import {
   getRefundableQuantity,
@@ -768,18 +769,10 @@ function getSaleSortDate(sale: SaleRecord) {
   return sale.refundedAt ?? sale.paidAt ?? sale.createdAt;
 }
 
-async function generateSupabaseInvoiceNumber() {
-  const admin = createAdminSupabaseClient();
-  if (!admin) {
-    return `INV-${Date.now()}`;
-  }
-
-  const { data, error } = await admin.rpc("generate_invoice_number");
-  if (error || !data) {
-    return `INV-${Date.now()}`;
-  }
-
-  return String(data);
+function generateFastInvoiceNumber() {
+  const timestamp = Date.now().toString();
+  const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 4).toUpperCase();
+  return `INV-${timestamp.slice(-8)}-${suffix}`;
 }
 
 async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession) {
@@ -788,36 +781,25 @@ async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession
     throw new Error("Supabase admin client is not configured.");
   }
   const saleColumnSupport = await getSaleColumnSupport(admin);
+  const trimmedCustomerName = input.customerName?.trim();
+  const customerName = trimmedCustomerName ? trimmedCustomerName : null;
+  const notes = input.notes ?? "";
 
   const productIds = [...new Set(input.items.map((item) => item.productId))];
-  const [productsResult, inventoryResult] = await Promise.all([
-    admin
-      .from("products")
-      .select(
-        "id, branch_id, name, flavor, sku, barcode, sale_price, cost_price, is_active",
-      )
-      .eq("branch_id", session.branchId)
-      .in("id", productIds),
-    admin
-      .from("inventory")
-      .select("id, product_id, quantity_on_hand, reorder_point")
-      .eq("branch_id", session.branchId)
-      .in("product_id", productIds),
-  ]);
+  const productsResult = await admin
+    .from("product_catalog_view")
+    .select(
+      "id, branch_id, name, flavor, sku, barcode, sale_price, cost_price, is_active, stock_quantity, reorder_point",
+    )
+    .eq("branch_id", session.branchId)
+    .in("id", productIds);
 
   if (productsResult.error) {
     throw new Error(productsResult.error.message);
   }
 
-  if (inventoryResult.error) {
-    throw new Error(inventoryResult.error.message);
-  }
-
   const productsById = new Map(
     (productsResult.data ?? []).map((product) => [String(product.id), product]),
-  );
-  const inventoryByProductId = new Map(
-    (inventoryResult.data ?? []).map((inventoryRow) => [String(inventoryRow.product_id), inventoryRow]),
   );
 
   const normalizedItems = input.items.map((item) => {
@@ -826,15 +808,10 @@ async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession
       throw new Error("Product is missing or inactive.");
     }
 
-    const inventoryRow = inventoryByProductId.get(item.productId);
-    if (!inventoryRow) {
-      throw new Error(`Inventory row is missing for ${product.name}.`);
-    }
-
     const quantity = Math.max(1, item.quantity);
     const discountAmount = Math.max(0, item.discountAmount);
     const unitPrice = Math.max(0, item.unitPrice);
-    const availableQuantity = Number(inventoryRow.quantity_on_hand ?? 0);
+    const availableQuantity = Number(product.stock_quantity ?? 0);
 
     if (availableQuantity < quantity) {
       throw new Error(`Insufficient stock for ${product.name}.`);
@@ -843,11 +820,14 @@ async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession
     const lineTotal = unitPrice * quantity - discountAmount;
     const unitCost = Number(product.cost_price ?? 0);
     const lineProfit = lineTotal - unitCost * quantity;
+    const productName =
+      String(product.name) + (product.flavor ? ` / ${String(product.flavor)}` : "");
 
     return {
+      saleItemId: crypto.randomUUID(),
       item,
       product,
-      inventoryRow,
+      productName,
       quantity,
       unitPrice,
       discountAmount,
@@ -862,79 +842,49 @@ async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession
   const subtotal = normalizedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const totalDiscount = normalizedItems.reduce((sum, item) => sum + item.discountAmount, 0);
   const totalAmount = Math.max(0, subtotal - totalDiscount);
-  const invoiceNumber = await generateSupabaseInvoiceNumber();
+  const invoiceNumber = generateFastInvoiceNumber();
   const now = new Date().toISOString();
   const paidAt = input.paymentStatus === "paid" ? now : null;
-
-  let saleId: string | null = null;
-  const inventoryRollbackStack: Array<{ id: string; quantityOnHand: number }> = [];
+  const saleId = crypto.randomUUID();
+  let saleInserted = false;
+  const inventoryRollbackStack: Array<{ productId: string; quantityOnHand: number }> = [];
 
   try {
     const saleInsertPayload: Record<string, unknown> = {
+      id: saleId,
       branch_id: session.branchId,
       invoice_number: invoiceNumber,
       employee_id: session.userId,
-      status: "draft",
+      status: "completed",
       payment_method: input.paymentMethod,
       payment_status: input.paymentStatus,
       subtotal,
       discount_amount: totalDiscount,
       tax_amount: 0,
       total_amount: totalAmount,
-      customer_name: input.customerName ?? null,
-      notes: input.notes ?? "",
+      customer_name: customerName,
+      notes,
     };
 
     if (saleColumnSupport.paidAt) {
       saleInsertPayload.paid_at = paidAt;
     }
 
-    const saleInsert = await admin
-      .from("sales")
-      .insert(saleInsertPayload)
-      .select("id")
-      .single();
+    const saleInsert = await admin.from("sales").insert(saleInsertPayload);
 
-    if (saleInsert.error || !saleInsert.data) {
-      throw new Error(saleInsert.error?.message ?? "Unable to create sale.");
+    if (saleInsert.error) {
+      throw new Error(saleInsert.error.message ?? "Unable to create sale.");
     }
 
-    saleId = String(saleInsert.data.id);
+    saleInserted = true;
 
-    for (const normalizedItem of normalizedItems) {
-      const inventoryUpdate = await admin
-        .from("inventory")
-        .update({
-          quantity_on_hand: normalizedItem.newQuantity,
-          updated_at: now,
-        })
-        .eq("id", normalizedItem.inventoryRow.id)
-        .eq("quantity_on_hand", normalizedItem.previousQuantity)
-        .select("id")
-        .maybeSingle();
-
-      if (inventoryUpdate.error) {
-        throw new Error(inventoryUpdate.error.message);
-      }
-
-      if (!inventoryUpdate.data) {
-        throw new Error(`Stock changed while selling ${normalizedItem.product.name}. Please try again.`);
-      }
-
-      inventoryRollbackStack.push({
-        id: String(normalizedItem.inventoryRow.id),
-        quantityOnHand: normalizedItem.previousQuantity,
-      });
-    }
-
-    const saleItemsInsert = await admin.from("sale_items").insert(
+    const saleItemsPromise = admin.from("sale_items").insert(
       normalizedItems.map((normalizedItem) => {
         const payload: Record<string, unknown> = {
+          id: normalizedItem.saleItemId,
           sale_id: saleId,
           product_id: normalizedItem.item.productId,
-          product_name_snapshot:
-            String(normalizedItem.product.name) +
-            (normalizedItem.product.flavor ? ` / ${String(normalizedItem.product.flavor)}` : ""),
+          product_name_snapshot: normalizedItem.productName,
           sku_snapshot: String(normalizedItem.product.sku ?? ""),
           barcode_snapshot: String(normalizedItem.product.barcode ?? ""),
           quantity: normalizedItem.quantity,
@@ -953,80 +903,166 @@ async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession
       }),
     );
 
+    const inventoryResults = await Promise.all(
+      normalizedItems.map((normalizedItem) =>
+        admin
+          .from("inventory")
+          .update({
+            quantity_on_hand: normalizedItem.newQuantity,
+            updated_at: now,
+          })
+          .eq("branch_id", session.branchId)
+          .eq("product_id", normalizedItem.item.productId)
+          .eq("quantity_on_hand", normalizedItem.previousQuantity)
+          .select("product_id")
+          .maybeSingle(),
+      ),
+    );
+
+    for (const [index, inventoryUpdate] of inventoryResults.entries()) {
+      const normalizedItem = normalizedItems[index];
+      if (inventoryUpdate.error) {
+        throw new Error(inventoryUpdate.error.message);
+      }
+
+      if (!inventoryUpdate.data) {
+        throw new Error(`Stock changed while selling ${normalizedItem.product.name}. Please try again.`);
+      }
+
+      inventoryRollbackStack.push({
+        productId: normalizedItem.item.productId,
+        quantityOnHand: normalizedItem.previousQuantity,
+      });
+    }
+
+    const saleItemsInsert = await saleItemsPromise;
     if (saleItemsInsert.error) {
       throw new Error(saleItemsInsert.error.message);
     }
 
-    const stockMovementInsert = await admin.from("stock_movements").insert(
-      normalizedItems.map((normalizedItem) => ({
-        branch_id: session.branchId,
-        product_id: normalizedItem.item.productId,
-        sale_id: saleId,
-        movement_type: "sale",
-        quantity_delta: -normalizedItem.quantity,
-        previous_quantity: normalizedItem.previousQuantity,
-        new_quantity: normalizedItem.newQuantity,
-        note:
-          input.paymentStatus === "pending"
-            ? `Pending sale ${invoiceNumber}`
-            : `Sale ${invoiceNumber}`,
-        performed_by: session.userId,
+    const alertCandidates = normalizedItems
+      .filter(
+        (normalizedItem) =>
+          normalizedItem.newQuantity <= Number(normalizedItem.product.reorder_point ?? 0),
+      )
+      .map((normalizedItem) => ({
+        productId: normalizedItem.item.productId,
+        currentQuantity: normalizedItem.newQuantity,
+        reorderPoint: Number(normalizedItem.product.reorder_point ?? 0),
+      }));
+
+    after(async () => {
+      const backgroundAdmin = createAdminSupabaseClient();
+      if (!backgroundAdmin) {
+        return;
+      }
+
+      const postCommitTasks = [
+        appendAuditLog(
+          session.branchId,
+          session.userId,
+          saleId,
+          input.paymentStatus === "pending" ? "created_pending" : "completed",
+          {
+            invoice_number: invoiceNumber,
+            subtotal,
+            discount_amount: totalDiscount,
+            payment_status: input.paymentStatus,
+            total_amount: totalAmount,
+          },
+        ),
+        backgroundAdmin.from("stock_movements").insert(
+          normalizedItems.map((normalizedItem) => ({
+            branch_id: session.branchId,
+            product_id: normalizedItem.item.productId,
+            sale_id: saleId,
+            movement_type: "sale",
+            quantity_delta: -normalizedItem.quantity,
+            previous_quantity: normalizedItem.previousQuantity,
+            new_quantity: normalizedItem.newQuantity,
+            note:
+              input.paymentStatus === "pending"
+                ? `Pending sale ${invoiceNumber}`
+                : `Sale ${invoiceNumber}`,
+            performed_by: session.userId,
+          })),
+        ),
+        ...alertCandidates.map((candidate) =>
+          backgroundAdmin.rpc("raise_low_stock_alert", {
+            p_branch_id: session.branchId,
+            p_product_id: candidate.productId,
+            p_current_quantity: candidate.currentQuantity,
+            p_reorder_point: candidate.reorderPoint,
+          }),
+        ),
+      ];
+
+      const postCommitResults = await Promise.allSettled(postCommitTasks);
+      for (const result of postCommitResults) {
+        if (result.status === "rejected") {
+          console.error("[createSale] Post-commit task failed", result.reason);
+        } else if (
+          result.value &&
+          typeof result.value === "object" &&
+          "error" in result.value &&
+          result.value.error
+        ) {
+          console.error("[createSale] Post-commit task failed", result.value.error);
+        }
+      }
+    });
+
+    return {
+      id: saleId,
+      branchId: session.branchId,
+      invoiceNumber,
+      employeeId: session.userId,
+      employeeName: session.fullName,
+      status: "completed",
+      paymentMethod: input.paymentMethod,
+      paymentStatus: input.paymentStatus,
+      subtotal,
+      discountAmount: totalDiscount,
+      taxAmount: 0,
+      totalAmount,
+      notes,
+      customerName,
+      createdAt: now,
+      paidAt,
+      refundedAmount: 0,
+      refundedAt: null,
+      refundReason: null,
+      items: normalizedItems.map((normalizedItem) => ({
+        id: normalizedItem.saleItemId,
+        productId: normalizedItem.item.productId,
+        productName: normalizedItem.productName,
+        sku: String(normalizedItem.product.sku ?? ""),
+        barcode: String(normalizedItem.product.barcode ?? ""),
+        quantity: normalizedItem.quantity,
+        unitPrice: normalizedItem.unitPrice,
+        pricingTier: normalizedItem.item.pricingTier,
+        unitCost: normalizedItem.unitCost,
+        discountAmount: normalizedItem.discountAmount,
+        lineTotal: normalizedItem.lineTotal,
+        lineProfit: normalizedItem.lineProfit,
+        refundedQuantity: 0,
+        refundedAt: null,
+        refundReason: null,
       })),
-    );
-
-    if (stockMovementInsert.error) {
-      throw new Error(stockMovementInsert.error.message);
-    }
-
-    await Promise.all(
-      normalizedItems.map((normalizedItem) =>
-        admin.rpc("raise_low_stock_alert", {
-          p_branch_id: session.branchId,
-          p_product_id: normalizedItem.item.productId,
-          p_current_quantity: normalizedItem.newQuantity,
-          p_reorder_point: Number(normalizedItem.inventoryRow.reorder_point ?? 0),
-        }),
-      ),
-    );
-
-    const saleUpdate = await admin
-      .from("sales")
-      .update({
-        status: "completed",
-        updated_at: now,
-      })
-      .eq("id", saleId)
-      .eq("branch_id", session.branchId)
-      .select("id")
-      .maybeSingle();
-
-    if (saleUpdate.error || !saleUpdate.data) {
-      throw new Error(saleUpdate.error?.message ?? "Unable to finalize sale.");
-    }
-
-    await appendAuditLog(
-      session.branchId,
-      session.userId,
-      saleId,
-      input.paymentStatus === "pending" ? "created_pending" : "completed",
-      {
-        invoice_number: invoiceNumber,
-        subtotal,
-        discount_amount: totalDiscount,
-        payment_status: input.paymentStatus,
-        total_amount: totalAmount,
-      },
-    );
-
-    return readSaleById(saleId, session.branchId);
+      refundEvents: [],
+    };
   } catch (error) {
     await Promise.all(
       inventoryRollbackStack.map((inventoryRow) =>
-        admin.from("inventory").update({ quantity_on_hand: inventoryRow.quantityOnHand }).eq("id", inventoryRow.id),
+        admin
+          .from("inventory")
+          .update({ quantity_on_hand: inventoryRow.quantityOnHand })
+          .eq("branch_id", session.branchId)
+          .eq("product_id", inventoryRow.productId),
       ),
     );
 
-    if (saleId) {
+    if (saleInserted) {
       await admin.from("sales").delete().eq("id", saleId).eq("branch_id", session.branchId);
     }
 

@@ -12,7 +12,11 @@ export default async function PosPage() {
   return (
     <AppShell session={session}>
       <div className="space-y-6">
-        <RealtimeRefresh channelName="pos-sync" tables={["sales", "inventory"]} />
+        <RealtimeRefresh
+          channelName="pos-sync"
+          tables={["sales", "inventory"]}
+          refreshDebounceMs={1500}
+        />
         <PageHeader
           eyebrow="POS"
           title="Cashier terminal"

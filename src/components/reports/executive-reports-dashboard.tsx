@@ -170,6 +170,9 @@ export function ExecutiveReportsDashboard({
                     border: "1px solid var(--border)",
                     color: "var(--foreground)",
                   }}
+                  labelFormatter={(_, payload) =>
+                    payload?.[0]?.payload?.fullLabel ?? "Month"
+                  }
                   formatter={(value) => formatCurrency(typeof value === "number" ? value : Number(value ?? 0))}
                 />
                 <Bar dataKey="revenue" fill="var(--brand-surface-strong)" radius={[10, 10, 0, 0]} />
@@ -202,6 +205,9 @@ export function ExecutiveReportsDashboard({
                     border: "1px solid var(--border)",
                     color: "var(--foreground)",
                   }}
+                  labelFormatter={(_, payload) =>
+                    payload?.[0]?.payload?.fullLabel ?? "Day"
+                  }
                   formatter={(value, name) => {
                     const numericValue =
                       typeof value === "number" ? value : Number(value ?? 0);
@@ -226,106 +232,60 @@ export function ExecutiveReportsDashboard({
         </SectionCard>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <SectionCard
-          title="Sales Channel Profit"
-          description="Profit split by retail, wholesale, and discount workflows."
-        >
-          <div className="grid gap-3">
-            {[
-              ["Retail sales", report.retailSalesProfit],
-              ["Wholesale sales", report.wholesaleSalesProfit],
-              ["Discount sales", report.discountSalesProfit],
-            ].map(([label, amount]) => (
-              <div
-                key={label}
-                className="flex items-center justify-between rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3"
-              >
-                <span className="text-sm font-medium text-[var(--heading)]">{label}</span>
-                <span className="text-sm font-semibold text-[var(--heading)]">
-                  {formatCurrency(amount as number)}
-                </span>
-              </div>
-            ))}
+      <SectionCard
+        title="Category Performance"
+        description="Category-level revenue, net profit, margin strength, and inventory exposure in one operational view."
+        aside={<Badge>{report.categoryPerformance.length} categories</Badge>}
+      >
+        {report.categoryPerformance.length === 0 ? (
+          <EmptyState label="Category analytics will appear once completed sales are recorded." />
+        ) : (
+          <div className="subtle-scroll overflow-x-auto">
+            <table className="data-table min-w-[860px] text-left text-sm">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Units</th>
+                  <th>Revenue</th>
+                  <th>Net profit</th>
+                  <th>Margin</th>
+                  <th>Inventory value</th>
+                  <th>Profit share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.categoryPerformance.map((category) => (
+                  <tr key={category.categoryName}>
+                    <td>
+                      <div className="space-y-2">
+                        <p className="font-medium text-[var(--heading)]">{category.categoryName}</p>
+                        <div className="h-2.5 w-32 overflow-hidden rounded-full bg-[var(--surface-soft)]">
+                          <div
+                            className="h-full rounded-full bg-[var(--brand)]"
+                            style={{
+                              width: `${Math.max(8, Math.min(100, category.profitShare * 100))}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td>{category.unitsSold}</td>
+                    <td className="font-medium text-[var(--heading)]">
+                      {formatCurrency(category.revenue)}
+                    </td>
+                    <td className="font-medium text-[var(--heading)]">
+                      {formatCurrency(category.netProfit)}
+                    </td>
+                    <td>{formatPercent(category.marginRate)}</td>
+                    <td>{formatCurrency(category.inventoryValue)}</td>
+                    <td>{formatPercent(category.profitShare)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </SectionCard>
-
-        <SectionCard
-          title="Expense Breakdown"
-          description="Operational cost visibility for rent, salaries, imports, utilities, and delivery."
-        >
-          {report.expenseBreakdown.length === 0 ? (
-            <EmptyState label="No operating expenses have been recorded yet." />
-          ) : (
-            <div className="space-y-3">
-              {report.expenseBreakdown.map((expense) => {
-                const ratio =
-                  report.kpis.totalExpenses > 0 ? expense.amount / report.kpis.totalExpenses : 0;
-
-                return (
-                  <div key={expense.label} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium capitalize text-[var(--heading)]">
-                        {expense.label.replaceAll("_", " ")}
-                      </span>
-                      <span className="text-[var(--heading)]">{formatCurrency(expense.amount)}</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-[var(--surface-soft)]">
-                      <div
-                        className="h-full rounded-full bg-[var(--brand)]"
-                        style={{ width: `${Math.max(8, Math.min(100, ratio * 100))}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title="Category Performance"
-          description="Sales, profit contribution, and inventory value by category."
-        >
-          {report.categoryPerformance.length === 0 ? (
-            <EmptyState label="Category analytics will appear once completed sales are recorded." />
-          ) : (
-            <div className="space-y-3">
-              {report.categoryPerformance.map((category) => (
-                <div
-                  key={category.categoryName}
-                  className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium text-[var(--heading)]">{category.categoryName}</p>
-                    <Badge>{category.unitsSold} units</Badge>
-                  </div>
-                  <div className="mt-3 grid gap-2 text-sm text-[var(--muted-foreground)]">
-                    <div className="flex items-center justify-between">
-                      <span>Revenue</span>
-                      <span className="font-medium text-[var(--heading)]">
-                        {formatCurrency(category.revenue)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Net profit</span>
-                      <span className="font-medium text-[var(--heading)]">
-                        {formatCurrency(category.netProfit)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Inventory value</span>
-                      <span className="font-medium text-[var(--heading)]">
-                        {formatCurrency(category.inventoryValue)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </SectionCard>
-      </div>
+        )}
+      </SectionCard>
 
       <div className="grid gap-6 2xl:grid-cols-[1.1fr_0.9fr]">
         <SectionCard
@@ -492,7 +452,7 @@ export function ExecutiveReportsDashboard({
         </SectionCard>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="grid gap-6 xl:grid-cols-2">
         <SectionCard
           title="Employee Performance"
           description="Orders handled, revenue produced, and profit contribution by staff."
@@ -521,43 +481,6 @@ export function ExecutiveReportsDashboard({
                       <span>Net profit</span>
                       <span className="font-medium text-[var(--heading)]">
                         {formatCurrency(employee.netProfit)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title="Top Customers"
-          description="Returning buyers and higher-value customer relationships if customer names are captured."
-        >
-          {report.topCustomers.length === 0 ? (
-            <EmptyState label="Customer analytics will appear once sales capture customer names." />
-          ) : (
-            <div className="space-y-3">
-              {report.topCustomers.map((customer) => (
-                <div
-                  key={customer.customerName}
-                  className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium text-[var(--heading)]">{customer.customerName}</p>
-                    <Badge>{customer.orders} orders</Badge>
-                  </div>
-                  <div className="mt-3 grid gap-2 text-sm text-[var(--muted-foreground)]">
-                    <div className="flex items-center justify-between">
-                      <span>Revenue</span>
-                      <span className="font-medium text-[var(--heading)]">
-                        {formatCurrency(customer.revenue)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Net profit</span>
-                      <span className="font-medium text-[var(--heading)]">
-                        {formatCurrency(customer.netProfit)}
                       </span>
                     </div>
                   </div>
