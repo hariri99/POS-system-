@@ -29,6 +29,10 @@ const admin = createClient(url, serviceRoleKey, {
 
 const PARTIAL_REFUND_MIGRATION_PATH =
   "supabase/migrations/20260518123000_partial_product_refunds.sql";
+const OPTIONAL_CLEANUP_MIGRATIONS = [
+  "supabase/migrations/20260519123000_remove_legacy_sales_workflow_rpcs.sql",
+  "supabase/migrations/20260519131000_remove_legacy_inventory_adjustment_rpc.sql",
+];
 
 async function checkTable(name, query) {
   const { data, error } = await query;
@@ -74,7 +78,7 @@ async function verifyRefundSchema() {
   }
 
   return compatibilityMode
-    ? `compatibility mode active; ${PARTIAL_REFUND_MIGRATION_PATH} is optional but recommended`
+    ? `compatibility mode active; ${PARTIAL_REFUND_MIGRATION_PATH} is recommended cleanup for native refund columns, but not required for the current refund flow`
     : "native schema ready for full-order and single-product refunds";
 }
 
@@ -118,6 +122,9 @@ async function main() {
   console.log(`[verify:live] suppliers available: ${supplierCount}`);
   console.log(`[verify:live] catalog rows visible: ${productViewCount}`);
   console.log(`[verify:live] refund schema: ${refundSchemaStatus}`);
+  console.log(
+    `[verify:live] optional cleanup migrations: ${OPTIONAL_CLEANUP_MIGRATIONS.join(", ")} are recommended, but not required for the direct checkout or inventory fixes`,
+  );
   console.log(
     `[verify:live] storage bucket 'product-images': ${bucketNames.includes("product-images") ? "found" : "missing"}`,
   );

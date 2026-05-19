@@ -80,8 +80,9 @@ This creates:
 Important:
 
 - do not stop after only `20260513195000_init.sql`
-- the refund workflow requires [20260518123000_partial_product_refunds.sql](/c:/Users/RitaM/OneDrive/Desktop/protein%20system/supabase/migrations/20260518123000_partial_product_refunds.sql)
-- if that migration is missing, refunds still work in compatibility mode, but applying it is still recommended for native database support
+- [20260518123000_partial_product_refunds.sql](/c:/Users/RitaM/OneDrive/Desktop/protein%20system/supabase/migrations/20260518123000_partial_product_refunds.sql) is recommended cleanup for native refund columns, but single-product refunds still work in compatibility mode if it has not been applied yet
+- [20260519123000_remove_legacy_sales_workflow_rpcs.sql](/c:/Users/RitaM/OneDrive/Desktop/protein%20system/supabase/migrations/20260519123000_remove_legacy_sales_workflow_rpcs.sql) and [20260519131000_remove_legacy_inventory_adjustment_rpc.sql](/c:/Users/RitaM/OneDrive/Desktop/protein%20system/supabase/migrations/20260519131000_remove_legacy_inventory_adjustment_rpc.sql) are recommended cleanup only
+- the current app already uses direct app-side sales, refunds, unpaid-order, and inventory-adjustment flows, so those cleanup migrations are not required for the working checkout fix you just tested
 
 ## Step 5: Run the seed data
 
@@ -115,6 +116,7 @@ If everything is connected correctly, the script will confirm:
 - your tables exist
 - catalog view is readable
 - refund handling is either fully migrated or running in compatibility mode
+- optional legacy-workflow cleanup migrations are not required for the direct checkout and inventory fixes
 - storage bucket status is visible
 
 ## Step 7: Create your real admin account

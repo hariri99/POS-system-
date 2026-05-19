@@ -185,24 +185,6 @@ function normalizeBrandName(name: string) {
   return name.trim().replace(/\s+/g, " ");
 }
 
-function isSchemaCompatibilityError(message: string, fnName: string) {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes(fnName.toLowerCase()) &&
-    (normalized.includes("schema cache") ||
-      normalized.includes("could not find the function") ||
-      normalized.includes("does not exist"))
-  );
-}
-
-function isRecoverableSaleRpcError(message: string, fnName: string) {
-  const normalized = message.toLowerCase();
-  return (
-    isSchemaCompatibilityError(message, fnName) ||
-    (normalized.includes("branch_id") && normalized.includes("ambiguous"))
-  );
-}
-
 function isMissingColumnError(message: string, columnName: string) {
   const normalized = message.toLowerCase();
   return (
@@ -227,6 +209,11 @@ function isMissingRelationError(message: string, relationName: string) {
 type ProductColumnSupport = {
   wholesalePrice: boolean;
   discountPrice: boolean;
+};
+
+type SaleColumnSupport = {
+  paidAt: boolean;
+  saleItemsExtendedFinancials: boolean;
 };
 
 type RefundSchemaSupport = {
@@ -254,6 +241,7 @@ export type RefundCapabilities = {
 };
 
 let productColumnSupportPromise: Promise<ProductColumnSupport> | null = null;
+let saleColumnSupportPromise: Promise<SaleColumnSupport> | null = null;
 let refundSchemaSupportPromise: Promise<RefundSchemaSupport> | null = null;
 
 const PARTIAL_REFUND_MIGRATION_PATH =
@@ -335,6 +323,42 @@ async function detectRefundSchemaSupport(
   return support;
 }
 
+async function detectSaleColumnSupport(
+  admin: NonNullable<ReturnType<typeof createAdminSupabaseClient>>,
+) {
+  const support: SaleColumnSupport = {
+    paidAt: true,
+    saleItemsExtendedFinancials: true,
+  };
+
+  const [salesProbe, saleItemsProbe] = await Promise.all([
+    admin.from("sales").select("id, paid_at").limit(1),
+    admin.from("sale_items").select("id, pricing_tier, unit_cost, profit_amount").limit(1),
+  ]);
+
+  if (salesProbe.error) {
+    if (isMissingColumnError(salesProbe.error.message, "paid_at")) {
+      support.paidAt = false;
+    } else {
+      console.error("[sales] Unable to probe sales.paid_at", salesProbe.error);
+    }
+  }
+
+  if (saleItemsProbe.error) {
+    if (
+      isMissingColumnError(saleItemsProbe.error.message, "pricing_tier") ||
+      isMissingColumnError(saleItemsProbe.error.message, "unit_cost") ||
+      isMissingColumnError(saleItemsProbe.error.message, "profit_amount")
+    ) {
+      support.saleItemsExtendedFinancials = false;
+    } else {
+      console.error("[sales] Unable to probe sale_items extended financial columns", saleItemsProbe.error);
+    }
+  }
+
+  return support;
+}
+
 async function getProductColumnSupport(
   admin: NonNullable<ReturnType<typeof createAdminSupabaseClient>>,
 ) {
@@ -346,6 +370,19 @@ async function getProductColumnSupport(
   }
 
   return productColumnSupportPromise;
+}
+
+async function getSaleColumnSupport(
+  admin: NonNullable<ReturnType<typeof createAdminSupabaseClient>>,
+) {
+  if (!saleColumnSupportPromise) {
+    saleColumnSupportPromise = detectSaleColumnSupport(admin).catch((error) => {
+      saleColumnSupportPromise = null;
+      throw error;
+    });
+  }
+
+  return saleColumnSupportPromise;
 }
 
 async function getRefundSchemaSupport(
@@ -679,6 +716,7 @@ async function appendAuditLog(
   entityId: string,
   action: string,
   payload: Record<string, unknown>,
+  entityType = "sale",
 ) {
   const admin = createAdminSupabaseClient();
   if (!admin) {
@@ -688,7 +726,7 @@ async function appendAuditLog(
   await admin.from("audit_logs").insert({
     branch_id: branchId,
     actor_id: actorId,
-    entity_type: "sale",
+    entity_type: entityType,
     entity_id: entityId,
     action,
     payload,
@@ -730,69 +768,6 @@ function getSaleSortDate(sale: SaleRecord) {
   return sale.refundedAt ?? sale.paidAt ?? sale.createdAt;
 }
 
-async function createLegacyCompatibleSale(input: PosSaleInput, session: AppSession) {
-  const supabase = await createServerSupabaseClient();
-  if (!supabase) {
-    throw new Error("Supabase client is not configured.");
-  }
-
-  const { data, error } = await supabase.rpc("process_sale", {
-    p_branch_id: session.branchId,
-    p_customer_name: input.customerName ?? null,
-    p_discount_amount: 0,
-    p_employee_id: session.userId,
-    p_items: input.items.map((item) => ({
-      product_id: item.productId,
-      quantity: item.quantity,
-      unit_price: item.unitPrice,
-      discount_amount: item.discountAmount,
-    })),
-    p_notes: input.notes ?? null,
-    p_payment_method: input.paymentMethod,
-  });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const sale = mapSale((Array.isArray(data) ? data[0] : data) as Record<string, unknown>);
-  if (input.paymentStatus !== "pending") {
-    return sale;
-  }
-
-  const admin = createAdminSupabaseClient();
-  if (!admin) {
-    throw new Error("Supabase admin client is not configured.");
-  }
-
-  const { data: updatedSale, error: updateError } = await admin
-    .from("sales")
-    .update({
-      payment_status: "pending",
-    })
-    .eq("id", sale.id)
-    .eq("branch_id", session.branchId)
-    .eq("status", "completed")
-    .select("id")
-    .maybeSingle();
-
-  if (updateError) {
-    throw new Error(updateError.message);
-  }
-
-  if (!updatedSale) {
-    throw new Error("Unable to switch the new sale into pay-later mode.");
-  }
-
-  await appendAuditLog(session.branchId, session.userId, sale.id, "created_pending", {
-    invoice_number: sale.invoiceNumber,
-    total_amount: sale.totalAmount,
-    payment_status: "pending",
-  });
-
-  return readSaleById(sale.id, session.branchId);
-}
-
 async function generateSupabaseInvoiceNumber() {
   const admin = createAdminSupabaseClient();
   if (!admin) {
@@ -812,6 +787,7 @@ async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession
   if (!admin) {
     throw new Error("Supabase admin client is not configured.");
   }
+  const saleColumnSupport = await getSaleColumnSupport(admin);
 
   const productIds = [...new Set(input.items.map((item) => item.productId))];
   const [productsResult, inventoryResult] = await Promise.all([
@@ -888,27 +864,34 @@ async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession
   const totalAmount = Math.max(0, subtotal - totalDiscount);
   const invoiceNumber = await generateSupabaseInvoiceNumber();
   const now = new Date().toISOString();
+  const paidAt = input.paymentStatus === "paid" ? now : null;
 
   let saleId: string | null = null;
   const inventoryRollbackStack: Array<{ id: string; quantityOnHand: number }> = [];
 
   try {
+    const saleInsertPayload: Record<string, unknown> = {
+      branch_id: session.branchId,
+      invoice_number: invoiceNumber,
+      employee_id: session.userId,
+      status: "draft",
+      payment_method: input.paymentMethod,
+      payment_status: input.paymentStatus,
+      subtotal,
+      discount_amount: totalDiscount,
+      tax_amount: 0,
+      total_amount: totalAmount,
+      customer_name: input.customerName ?? null,
+      notes: input.notes ?? "",
+    };
+
+    if (saleColumnSupport.paidAt) {
+      saleInsertPayload.paid_at = paidAt;
+    }
+
     const saleInsert = await admin
       .from("sales")
-      .insert({
-        branch_id: session.branchId,
-        invoice_number: invoiceNumber,
-        employee_id: session.userId,
-        status: "draft",
-        payment_method: input.paymentMethod,
-        payment_status: input.paymentStatus,
-        subtotal,
-        discount_amount: totalDiscount,
-        tax_amount: 0,
-        total_amount: totalAmount,
-        customer_name: input.customerName ?? null,
-        notes: input.notes ?? "",
-      })
+      .insert(saleInsertPayload)
       .select("id")
       .single();
 
@@ -945,22 +928,29 @@ async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession
     }
 
     const saleItemsInsert = await admin.from("sale_items").insert(
-      normalizedItems.map((normalizedItem) => ({
-        sale_id: saleId,
-        product_id: normalizedItem.item.productId,
-        product_name_snapshot:
-          String(normalizedItem.product.name) +
-          (normalizedItem.product.flavor ? ` / ${String(normalizedItem.product.flavor)}` : ""),
-        sku_snapshot: String(normalizedItem.product.sku ?? ""),
-        barcode_snapshot: String(normalizedItem.product.barcode ?? ""),
-        quantity: normalizedItem.quantity,
-        unit_price: normalizedItem.unitPrice,
-        pricing_tier: normalizedItem.item.pricingTier,
-        unit_cost: normalizedItem.unitCost,
-        discount_amount: normalizedItem.discountAmount,
-        total_line_amount: normalizedItem.lineTotal,
-        profit_amount: normalizedItem.lineProfit,
-      })),
+      normalizedItems.map((normalizedItem) => {
+        const payload: Record<string, unknown> = {
+          sale_id: saleId,
+          product_id: normalizedItem.item.productId,
+          product_name_snapshot:
+            String(normalizedItem.product.name) +
+            (normalizedItem.product.flavor ? ` / ${String(normalizedItem.product.flavor)}` : ""),
+          sku_snapshot: String(normalizedItem.product.sku ?? ""),
+          barcode_snapshot: String(normalizedItem.product.barcode ?? ""),
+          quantity: normalizedItem.quantity,
+          unit_price: normalizedItem.unitPrice,
+          discount_amount: normalizedItem.discountAmount,
+          total_line_amount: normalizedItem.lineTotal,
+        };
+
+        if (saleColumnSupport.saleItemsExtendedFinancials) {
+          payload.pricing_tier = normalizedItem.item.pricingTier;
+          payload.unit_cost = normalizedItem.unitCost;
+          payload.profit_amount = normalizedItem.lineProfit;
+        }
+
+        return payload;
+      }),
     );
 
     if (saleItemsInsert.error) {
@@ -1774,83 +1764,17 @@ export async function getDashboardSnapshot(session: AppSession) {
 
 export async function createSale(input: PosSaleInput, session: AppSession) {
   assertSupabaseConfigured();
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase!.rpc("process_sale", {
-    p_branch_id: session.branchId,
-    p_customer_name: input.customerName ?? null,
-    p_discount_amount: 0,
-    p_employee_id: session.userId,
-    p_items: input.items.map((item) => ({
-      product_id: item.productId,
-      quantity: item.quantity,
-      unit_price: item.unitPrice,
-      pricing_tier: item.pricingTier,
-      discount_amount: item.discountAmount,
-    })),
-    p_notes: input.notes ?? null,
-    p_payment_method: input.paymentMethod,
-    p_payment_status: input.paymentStatus,
-  });
-
-  if (error) {
-    if (isRecoverableSaleRpcError(error.message, "process_sale")) {
-      try {
-        return await createDirectSupabaseSale(input, session);
-      } catch (directError) {
-        console.error("[createSale] Direct Supabase fallback failed", directError);
-
-        if (isSchemaCompatibilityError(error.message, "process_sale")) {
-          return createLegacyCompatibleSale(input, session);
-        }
-
-        if (directError instanceof Error) {
-          throw directError;
-        }
-      }
-    }
-
-    throw new Error(error.message);
-  }
-
-  return mapSale((Array.isArray(data) ? data[0] : data) as Record<string, unknown>);
+  return createDirectSupabaseSale(input, session);
 }
 
 export async function settlePendingSale(saleId: string, session: AppSession) {
   assertSupabaseConfigured();
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase!.rpc("settle_pending_sale", {
-    p_branch_id: session.branchId,
-    p_sale_id: saleId,
-  });
-
-  if (error) {
-    if (isRecoverableSaleRpcError(error.message, "settle_pending_sale")) {
-      return settleLegacyPendingSale(saleId, session);
-    }
-
-    throw new Error(error.message);
-  }
-
-  return mapSale((Array.isArray(data) ? data[0] : data) as Record<string, unknown>);
+  return settleLegacyPendingSale(saleId, session);
 }
 
 export async function voidPendingSale(saleId: string, session: AppSession) {
   assertSupabaseConfigured();
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase!.rpc("void_pending_sale", {
-    p_branch_id: session.branchId,
-    p_sale_id: saleId,
-  });
-
-  if (error) {
-    if (isRecoverableSaleRpcError(error.message, "void_pending_sale")) {
-      return voidLegacyPendingSale(saleId, session);
-    }
-
-    throw new Error(error.message);
-  }
-
-  return mapSale((Array.isArray(data) ? data[0] : data) as Record<string, unknown>);
+  return voidLegacyPendingSale(saleId, session);
 }
 
 export async function refundPaidSale(
@@ -1859,54 +1783,7 @@ export async function refundPaidSale(
   session: AppSession,
 ) {
   assertSupabaseConfigured();
-  const admin = createAdminSupabaseClient();
-  if (!admin) {
-    throw new Error("Supabase admin client is not configured.");
-  }
-
-  const refundSchemaSupport = await getRefundSchemaSupport(admin);
-  const hasFullRefundSchemaSupport =
-    refundSchemaSupport.salesRefundAmount && refundSchemaSupport.saleItemsRefundState;
-
-  if (input.scope === "item" || !hasFullRefundSchemaSupport) {
-    return refundLegacyPaidSale(saleId, input, session);
-  }
-
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase!.rpc("refund_sale", {
-    p_branch_id: session.branchId,
-    p_sale_id: saleId,
-    p_scope: input.scope,
-    p_sale_item_id: input.saleItemId ?? null,
-    p_refund_reason: input.reason ?? null,
-  });
-
-  if (error) {
-    if (isRecoverableSaleRpcError(error.message, "refund_sale")) {
-      if (input.scope === "order") {
-        const legacyRpcResult = await supabase!.rpc("refund_sale", {
-          p_branch_id: session.branchId,
-          p_sale_id: saleId,
-          p_refund_reason: input.reason ?? null,
-        });
-
-        if (!legacyRpcResult.error) {
-          return mapSale(
-            (Array.isArray(legacyRpcResult.data) ? legacyRpcResult.data[0] : legacyRpcResult.data) as Record<
-              string,
-              unknown
-            >,
-          );
-        }
-      }
-
-      return refundLegacyPaidSale(saleId, input, session);
-    }
-
-    throw new Error(error.message);
-  }
-
-  return mapSale((Array.isArray(data) ? data[0] : data) as Record<string, unknown>);
+  return refundLegacyPaidSale(saleId, input, session);
 }
 
 export async function mutateProduct(input: ProductMutationInput, session: AppSession) {
@@ -2065,21 +1942,163 @@ export async function deleteProduct(productId: string, session: AppSession) {
 
 export async function adjustInventory(input: InventoryAdjustmentInput, session: AppSession) {
   assertSupabaseConfigured();
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase!.rpc("adjust_inventory", {
-    p_actor_id: session.userId,
-    p_branch_id: session.branchId,
-    p_note: input.note,
-    p_product_id: input.productId,
-    p_quantity_delta: input.quantityDelta,
-    p_supplier_id: input.supplierId ?? null,
-  });
-
-  if (error) {
-    throw new Error(error.message);
+  if (session.role !== "admin") {
+    throw new Error("Only admins can adjust inventory.");
   }
 
-  return mapStockMovement((Array.isArray(data) ? data[0] : data) as Record<string, unknown>);
+  const admin = createAdminSupabaseClient();
+  if (!admin) {
+    throw new Error("Supabase admin client is not configured.");
+  }
+
+  const normalizedNote = input.note.trim();
+  const [{ data: inventoryRow, error: inventoryError }, { data: productRow, error: productError }] =
+    await Promise.all([
+      admin
+        .from("inventory")
+        .select("id, quantity_on_hand, reorder_point, last_restocked_at")
+        .eq("branch_id", session.branchId)
+        .eq("product_id", input.productId)
+        .maybeSingle(),
+      admin
+        .from("products")
+        .select("id, name, flavor")
+        .eq("branch_id", session.branchId)
+        .eq("id", input.productId)
+        .maybeSingle(),
+    ]);
+
+  if (inventoryError) {
+    throw new Error(inventoryError.message);
+  }
+
+  if (productError) {
+    throw new Error(productError.message);
+  }
+
+  if (!inventoryRow || !productRow) {
+    throw new Error("Inventory row not found.");
+  }
+
+  const previousQuantity = Number(inventoryRow.quantity_on_hand ?? 0);
+  const reorderPoint = Number(inventoryRow.reorder_point ?? 0);
+  const newQuantity = previousQuantity + input.quantityDelta;
+
+  if (newQuantity < 0) {
+    throw new Error("Adjustment would result in negative stock.");
+  }
+
+  const movementType: StockMovementRecord["movementType"] =
+    input.quantityDelta >= 0 ? "restock" : "adjustment";
+  const now = new Date().toISOString();
+  const movementId = crypto.randomUUID();
+  const previousLastRestockedAt = (inventoryRow.last_restocked_at as string | null) ?? null;
+
+  const inventoryUpdatePayload: Record<string, unknown> = {
+    quantity_on_hand: newQuantity,
+    updated_at: now,
+  };
+
+  if (input.quantityDelta > 0) {
+    inventoryUpdatePayload.last_restocked_at = now;
+  }
+
+  const inventoryUpdate = await admin
+    .from("inventory")
+    .update(inventoryUpdatePayload)
+    .eq("id", inventoryRow.id)
+    .eq("branch_id", session.branchId)
+    .eq("product_id", input.productId)
+    .select("id")
+    .maybeSingle();
+
+  if (inventoryUpdate.error || !inventoryUpdate.data) {
+    throw new Error(inventoryUpdate.error?.message ?? "Unable to update inventory.");
+  }
+
+  const movementInsert = await admin.from("stock_movements").insert({
+    id: movementId,
+    branch_id: session.branchId,
+    product_id: input.productId,
+    supplier_id: input.supplierId ?? null,
+    movement_type: movementType,
+    quantity_delta: input.quantityDelta,
+    previous_quantity: previousQuantity,
+    new_quantity: newQuantity,
+    note: normalizedNote,
+    performed_by: session.userId,
+  });
+
+  if (movementInsert.error) {
+    await admin
+      .from("inventory")
+      .update({
+        quantity_on_hand: previousQuantity,
+        last_restocked_at: previousLastRestockedAt,
+        updated_at: now,
+      })
+      .eq("id", inventoryRow.id)
+      .eq("branch_id", session.branchId)
+      .eq("product_id", input.productId);
+
+    throw new Error(movementInsert.error.message);
+  }
+
+  const lowStockAlert = await admin.rpc("raise_low_stock_alert", {
+    p_branch_id: session.branchId,
+    p_product_id: input.productId,
+    p_current_quantity: newQuantity,
+    p_reorder_point: reorderPoint,
+  });
+
+  if (lowStockAlert.error) {
+    console.error("[adjustInventory] Unable to raise low stock alert", lowStockAlert.error);
+  }
+
+  await appendAuditLog(
+    session.branchId,
+    session.userId,
+    input.productId,
+    "adjusted",
+    {
+      quantity_delta: input.quantityDelta,
+      new_quantity: newQuantity,
+      note: normalizedNote,
+      supplier_id: input.supplierId ?? null,
+    },
+    "inventory",
+  );
+
+  const movementResult = await admin
+    .from("stock_movements_view")
+    .select("*")
+    .eq("id", movementId)
+    .maybeSingle();
+
+  if (movementResult.error) {
+    throw new Error(movementResult.error.message);
+  }
+
+  if (movementResult.data) {
+    return mapStockMovement(movementResult.data as Record<string, unknown>);
+  }
+
+  return {
+    id: movementId,
+    productId: input.productId,
+    productName:
+      String(productRow.name) +
+      ((productRow.flavor as string | null) ? ` / ${String(productRow.flavor)}` : ""),
+    movementType,
+    quantityDelta: input.quantityDelta,
+    previousQuantity,
+    newQuantity,
+    note: normalizedNote,
+    performedBy: session.userId,
+    performedByName: session.fullName,
+    supplierId: input.supplierId ?? null,
+    createdAt: now,
+  };
 }
 
 export async function getPosProducts(session: AppSession) {
