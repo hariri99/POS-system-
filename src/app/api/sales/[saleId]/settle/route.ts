@@ -1,15 +1,15 @@
 import { apiError, apiSuccess, requireApiRole } from "@/lib/api";
-import { deleteProduct } from "@/lib/platform";
+import { settlePendingSale } from "@/lib/platform";
 
-export async function DELETE(
+export async function POST(
   _request: Request,
-  context: { params: Promise<{ productId: string }> },
+  context: { params: Promise<{ saleId: string }> },
 ) {
   try {
     const session = await requireApiRole("admin");
-    const { productId } = await context.params;
-    const result = await deleteProduct(productId, session);
-    return apiSuccess(result, "Product deleted.");
+    const { saleId } = await context.params;
+    const sale = await settlePendingSale(saleId, session);
+    return apiSuccess(sale, "Pending order marked as paid.");
   } catch (error) {
     if (error instanceof Error) {
       if (error.message === "UNAUTHORIZED") {
@@ -23,6 +23,6 @@ export async function DELETE(
       return apiError(error.message, 400);
     }
 
-    return apiError("Unexpected error while deleting product.", 500);
+    return apiError("Unexpected error while settling the unpaid order.", 500);
   }
 }

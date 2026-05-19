@@ -19,7 +19,7 @@ const highlights = [
   },
   {
     title: "Role-aware security",
-    description: "Use Supabase Auth, protected routes, and operational permissions built for owners and employees.",
+    description: "Use role-based staff login names, protected routes, and operational permissions built for owners and employees.",
     icon: ShieldCheck,
   },
   {
@@ -102,7 +102,7 @@ export default async function HomePage() {
               </div>
               <div className="grid gap-3">
                 {[
-                  "Supabase Auth with admin and employee roles",
+                  "Login-name and password access for staff",
                   "Realtime stock-aware POS workflow",
                   "Product and expiry management for supplements",
                   "Sales analytics designed for mobile and desktop",

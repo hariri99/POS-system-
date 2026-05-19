@@ -3,33 +3,52 @@
 import Image from "next/image";
 import { useMemo, useState, useTransition } from "react";
 import { Minus, Plus, Search, Trash2 } from "lucide-react";
+import { SaleProductsPreview } from "@/components/sales/sale-products-preview";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { usePosStore } from "@/stores/pos-store";
 import { type PaymentMethod, type ProductRecord, type SaleRecord } from "@/lib/types";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatPaymentMethod } from "@/lib/utils";
+
+function normalizeUnitPriceDraft(value: string) {
+  if (value === "") {
+    return "";
+  }
+
+  const [wholePart, fractionalPart] = value.split(".");
+  const normalizedWholePart = wholePart.replace(/^0+(?=\d)/, "");
+
+  if (fractionalPart != null) {
+    return `${normalizedWholePart || "0"}.${fractionalPart}`;
+  }
+
+  return normalizedWholePart;
+}
 
 export function PosTerminal({
   products: initialProducts,
   recentSales: initialSales,
+  canViewAdvancedPricing,
 }: {
   products: ProductRecord[];
   recentSales: SaleRecord[];
+  canViewAdvancedPricing: boolean;
 }) {
   const cart = usePosStore((state) => state.cart);
   const addProduct = usePosStore((state) => state.addProduct);
   const removeProduct = usePosStore((state) => state.removeProduct);
   const updateQuantity = usePosStore((state) => state.updateQuantity);
   const updatePricingTier = usePosStore((state) => state.updatePricingTier);
-  const updateDiscount = usePosStore((state) => state.updateDiscount);
+  const updateUnitPrice = usePosStore((state) => state.updateUnitPrice);
   const clearCart = usePosStore((state) => state.clearCart);
   const [query, setQuery] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [paymentStatus, setPaymentStatus] = useState<"paid" | "pending">("paid");
   const [notes, setNotes] = useState("");
   const [customerName, setCustomerName] = useState("");
-  const [globalDiscount, setGlobalDiscount] = useState("0");
+  const [unitPriceDrafts, setUnitPriceDrafts] = useState<Record<string, string>>({});
   const [products, setProducts] = useState(initialProducts);
   const [recentSales, setRecentSales] = useState(initialSales);
   const [message, setMessage] = useState<string | null>(null);
@@ -46,9 +65,42 @@ export function PosTerminal({
   }, [products, query]);
 
   const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const lineDiscounts = cart.reduce((sum, item) => sum + item.discountAmount, 0);
-  const discount = Number(globalDiscount) + lineDiscounts;
-  const total = Math.max(0, subtotal - discount);
+  const total = subtotal;
+
+  function clearUnitPriceDraft(productId: string) {
+    setUnitPriceDrafts((current) => {
+      if (!(productId in current)) {
+        return current;
+      }
+
+      const nextDrafts = { ...current };
+      delete nextDrafts[productId];
+      return nextDrafts;
+    });
+  }
+
+  function handleUnitPriceDraftChange(productId: string, value: string) {
+    const normalizedValue = normalizeUnitPriceDraft(value);
+
+    setUnitPriceDrafts((current) => ({
+      ...current,
+      [productId]: normalizedValue,
+    }));
+
+    if (normalizedValue !== "") {
+      updateUnitPrice(productId, Number(normalizedValue));
+    }
+  }
+
+  function handleRemoveProduct(productId: string) {
+    removeProduct(productId);
+    clearUnitPriceDraft(productId);
+  }
+
+  function handleCancelSale() {
+    clearCart();
+    setUnitPriceDrafts({});
+  }
 
   async function checkout() {
     if (cart.length === 0) {
@@ -56,9 +108,14 @@ export function PosTerminal({
       return;
     }
 
+    if (paymentStatus === "pending" && customerName.trim().length < 2) {
+      setMessage("Add the customer name before saving an unpaid order.");
+      return;
+    }
+
     setMessage(null);
 
-    startTransition(async () => {
+    try {
       const response = await fetch("/api/pos/sales", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -68,12 +125,12 @@ export function PosTerminal({
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             pricingTier: item.pricingTier,
-            discountAmount: item.discountAmount,
+            discountAmount: 0,
           })),
           paymentMethod,
+          paymentStatus,
           notes,
           customerName,
-          discountAmount: Number(globalDiscount),
         }),
       });
 
@@ -84,26 +141,35 @@ export function PosTerminal({
       }
 
       const sale = payload.data as SaleRecord;
-      setProducts((current) =>
-        current.map((product) => {
-          const matchingLine = sale.items.find((item) => item.productId === product.id);
-          if (!matchingLine) {
-            return product;
-          }
+      startTransition(() => {
+        setProducts((current) =>
+          current.map((product) => {
+            const matchingLine = sale.items.find((item) => item.productId === product.id);
+            if (!matchingLine) {
+              return product;
+            }
 
-          return {
-            ...product,
-            stockQuantity: Math.max(0, product.stockQuantity - matchingLine.quantity),
-          };
-        }),
-      );
-      setRecentSales((current) => [sale, ...current]);
-      clearCart();
-      setNotes("");
-      setCustomerName("");
-      setGlobalDiscount("0");
-      setMessage(`Sale completed. Receipt ${sale.invoiceNumber} for ${formatCurrency(sale.totalAmount)}.`);
-    });
+            return {
+              ...product,
+              stockQuantity: Math.max(0, product.stockQuantity - matchingLine.quantity),
+            };
+          }),
+        );
+        setRecentSales((current) => [sale, ...current]);
+        clearCart();
+        setUnitPriceDrafts({});
+        setNotes("");
+        setCustomerName("");
+        setPaymentStatus("paid");
+        setMessage(
+          sale.paymentStatus === "pending"
+            ? `Unpaid order saved. Receipt ${sale.invoiceNumber} is pending for ${formatCurrency(sale.totalAmount)}.`
+            : `Sale completed. Receipt ${sale.invoiceNumber} for ${formatCurrency(sale.totalAmount)}.`,
+        );
+      });
+    } catch {
+      setMessage("Unexpected error while saving the sale.");
+    }
   }
 
   return (
@@ -178,9 +244,11 @@ export function PosTerminal({
                     >
                       {product.stockQuantity} in stock
                     </span>
-                    <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
-                      Wholesale {formatCurrency(product.wholesalePrice)}
-                    </p>
+                    {canViewAdvancedPricing ? (
+                      <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                        Wholesale {formatCurrency(product.wholesalePrice)}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </button>
@@ -188,36 +256,49 @@ export function PosTerminal({
           </div>
         </Card>
 
-        <Card>
-          <div>
+        <Card className="flex h-[32rem] flex-col overflow-hidden p-0">
+          <div className="border-b border-[var(--border)] bg-[linear-gradient(180deg,var(--surface)_0%,var(--surface-soft)_100%)] px-5 py-5">
             <h2 className="text-xl font-semibold text-white">Recent transactions</h2>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
               Cashiers can confirm payment flow while managers audit timing and employee attribution.
             </p>
           </div>
-          <div className="mt-5 space-y-3">
-            {recentSales.slice(0, 5).map((sale) => (
-              <div
-                key={sale.id}
-                className="surface-card-strong flex flex-col gap-3 rounded-[18px] p-4 md:flex-row md:items-center md:justify-between"
-              >
-                <div>
-                  <p className="font-medium text-white">{sale.invoiceNumber}</p>
-                  <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                    {sale.employeeName} / {sale.paymentMethod}
-                  </p>
+          <div className="subtle-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <div className="space-y-3">
+              {recentSales.slice(0, 8).map((sale) => (
+                <div key={sale.id} className="surface-card-strong rounded-[18px] p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium text-white">{sale.invoiceNumber}</p>
+                        <span className="status-pill border-white/10 bg-white/[0.04] text-[var(--muted-foreground)]">
+                          {formatPaymentMethod(sale.paymentMethod)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                        {sale.employeeName}
+                      </p>
+                      <SaleProductsPreview
+                        items={sale.items}
+                        compact
+                        displayMode="summary"
+                        showSummary={false}
+                        className="mt-3"
+                      />
+                    </div>
+                    <div className="md:text-right">
+                      <p className="font-semibold text-white">{formatCurrency(sale.totalAmount)}</p>
+                      <p className="text-sm text-[var(--muted-foreground)]">
+                        {new Date(sale.createdAt).toLocaleTimeString("en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="md:text-right">
-                  <p className="font-semibold text-white">{formatCurrency(sale.totalAmount)}</p>
-                  <p className="text-sm text-[var(--muted-foreground)]">
-                    {new Date(sale.createdAt).toLocaleTimeString("en-US", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </p>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </Card>
       </div>
@@ -228,7 +309,7 @@ export function PosTerminal({
           <div>
             <h2 className="text-2xl font-semibold tracking-[-0.03em] text-white">Cart summary</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
-              Keep quantities, discounts, and totals readable so the cashier flow stays fast under
+              Keep quantities, price edits, and totals readable so the cashier flow stays fast under
               pressure.
             </p>
           </div>
@@ -246,47 +327,63 @@ export function PosTerminal({
                 <div className="space-y-1">
                   <p className="font-medium text-white">{item.name}</p>
                   <p className="text-xs text-[var(--muted-foreground)]">
-                    {formatCurrency(item.unitPrice)} each / Cost {formatCurrency(item.costPrice)}
+                    {formatCurrency(item.unitPrice)} each
                   </p>
+                  {canViewAdvancedPricing ? (
+                    <p className="text-xs text-[var(--muted-foreground)]">
+                      Cost {formatCurrency(item.costPrice)}
+                    </p>
+                  ) : null}
                 </div>
                 <Button
                   variant="ghost"
                   className="size-9 px-0"
-                  onClick={() => removeProduct(item.productId)}
+                  onClick={() => handleRemoveProduct(item.productId)}
                 >
                   <Trash2 className="size-4" />
                 </Button>
               </div>
               <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div
+                  className={`grid gap-3 ${canViewAdvancedPricing ? "sm:grid-cols-2" : "sm:grid-cols-1"}`}
+                >
+                  {canViewAdvancedPricing ? (
+                    <label className="space-y-2">
+                      <span className="field-label">Pricing tier</span>
+                      <Select
+                        value={item.pricingTier}
+                        onChange={(event) =>
+                          updatePricingTier(
+                            item.productId,
+                            event.target.value as "retail" | "wholesale" | "discount",
+                          )
+                        }
+                      >
+                        <option value="retail">Retail</option>
+                        <option value="wholesale">Wholesale</option>
+                        <option value="discount" disabled={item.discountPrice == null}>
+                          Discount
+                        </option>
+                      </Select>
+                    </label>
+                  ) : null}
                   <label className="space-y-2">
-                    <span className="field-label">Pricing tier</span>
-                    <Select
-                      value={item.pricingTier}
-                      onChange={(event) =>
-                        updatePricingTier(
-                          item.productId,
-                          event.target.value as "retail" | "wholesale" | "discount",
-                        )
-                      }
-                    >
-                      <option value="retail">Retail</option>
-                      <option value="wholesale">Wholesale</option>
-                      <option value="discount" disabled={item.discountPrice == null}>
-                        Discount
-                      </option>
-                    </Select>
-                  </label>
-                  <label className="space-y-2">
-                    <span className="field-label">Line discount</span>
+                    <span className="field-label">Price</span>
                     <Input
                       type="number"
                       min="0"
-                      placeholder="Discount"
-                      value={item.discountAmount}
+                      step="0.01"
+                      value={unitPriceDrafts[item.productId] ?? String(item.unitPrice)}
                       onChange={(event) =>
-                        updateDiscount(item.productId, Number(event.target.value || 0))
+                        handleUnitPriceDraftChange(item.productId, event.target.value)
                       }
+                      onBlur={() => clearUnitPriceDraft(item.productId)}
+                      onFocus={(event) => event.target.select()}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.currentTarget.blur();
+                        }
+                      }}
                     />
                   </label>
                 </div>
@@ -312,16 +409,16 @@ export function PosTerminal({
                   </div>
                   <div className="text-right">
                     <p className="min-w-24 font-semibold text-white">
-                      {formatCurrency(item.quantity * item.unitPrice - item.discountAmount)}
+                      {formatCurrency(item.quantity * item.unitPrice)}
                     </p>
-                    <p className="text-xs text-[var(--muted-foreground)]">
-                      Profit{" "}
-                      {formatCurrency(
-                        item.quantity * item.unitPrice -
-                          item.discountAmount -
-                          item.quantity * item.costPrice,
-                      )}
-                    </p>
+                    {canViewAdvancedPricing ? (
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        Profit{" "}
+                        {formatCurrency(
+                          item.quantity * item.unitPrice - item.quantity * item.costPrice,
+                        )}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -331,29 +428,32 @@ export function PosTerminal({
 
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-2">
+            <span className="field-label">Payment timing</span>
+            <Select
+              value={paymentStatus}
+              onChange={(event) => setPaymentStatus(event.target.value as "paid" | "pending")}
+            >
+              <option value="paid">Paid now</option>
+              <option value="pending">Pay later</option>
+            </Select>
+          </label>
+          <label className="space-y-2">
             <span className="field-label">Payment method</span>
             <Select
               value={paymentMethod}
               onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}
             >
               <option value="cash">Cash</option>
-              <option value="card">Card</option>
-              <option value="bank_transfer">Bank transfer</option>
-              <option value="mixed">Mixed</option>
+              <option value="whish_money">Whish Money</option>
             </Select>
           </label>
           <label className="space-y-2">
-            <span className="field-label">Order discount</span>
-            <Input
-              type="number"
-              min="0"
-              value={globalDiscount}
-              onChange={(event) => setGlobalDiscount(event.target.value)}
-            />
-          </label>
-          <label className="space-y-2">
             <span className="field-label">Customer</span>
-            <Input value={customerName} onChange={(event) => setCustomerName(event.target.value)} />
+            <Input
+              value={customerName}
+              onChange={(event) => setCustomerName(event.target.value)}
+              placeholder={paymentStatus === "pending" ? "Required for pay later" : ""}
+            />
           </label>
           <label className="space-y-2">
             <span className="field-label">Notes</span>
@@ -362,13 +462,15 @@ export function PosTerminal({
         </div>
 
         <div className="surface-card-strong rounded-[20px] p-4">
+          <div className="mb-3 flex items-center justify-between text-sm">
+            <span className="text-[var(--muted-foreground)]">Order type</span>
+            <span className="font-medium text-white">
+              {paymentStatus === "pending" ? "Pay later" : "Paid now"}
+            </span>
+          </div>
           <div className="flex items-center justify-between text-sm text-[var(--muted-foreground)]">
             <span>Subtotal</span>
             <span>{formatCurrency(subtotal)}</span>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-sm text-[var(--muted-foreground)]">
-            <span>Discounts</span>
-            <span>-{formatCurrency(discount)}</span>
           </div>
           <div className="mt-4 flex items-center justify-between border-t border-[var(--border)] pt-4 text-lg font-semibold text-white">
             <span>Total</span>
@@ -378,9 +480,9 @@ export function PosTerminal({
 
         <div className="space-y-3">
           <Button className="w-full" onClick={checkout} disabled={isPending}>
-            Complete sale
+            {paymentStatus === "pending" ? "Save unpaid order" : "Complete sale"}
           </Button>
-          <Button className="w-full" variant="secondary" onClick={clearCart}>
+          <Button className="w-full" variant="secondary" onClick={handleCancelSale}>
             Cancel sale
           </Button>
         </div>

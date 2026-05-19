@@ -1,5 +1,7 @@
 import { addDays, startOfMonth, subDays } from "date-fns";
 import { nanoid } from "nanoid";
+import { getRefundableQuantity, getSaleNetTotal, getSaleRefundedAmount, isRefundableStatus } from "@/lib/sale-math";
+import { buildDashboardSummary } from "@/lib/reporting";
 import {
   type AlertRecord,
   type AppSession,
@@ -15,12 +17,12 @@ import {
   type ProductRecord,
   type ProductPricingTier,
   type SaleItemRecord,
+  type SaleRefundInput,
   type SaleRecord,
   type StockMovementRecord,
   type SupplierRecord,
 } from "@/lib/types";
 import { createInvoiceNumber, slugify } from "@/lib/utils";
-import { buildDashboardSummary } from "@/lib/reporting";
 
 interface DemoStore {
   sessions: Record<string, AppSession>;
@@ -48,6 +50,38 @@ function nowIso() {
 
 function normalizeBrandName(name: string) {
   return name.trim().replace(/\s+/g, " ");
+}
+
+function getSaleSortDate(sale: SaleRecord) {
+  return sale.refundedAt ?? sale.paidAt ?? sale.createdAt;
+}
+
+type SeedSaleItem = Omit<SaleItemRecord, "refundedQuantity" | "refundedAt" | "refundReason"> &
+  Partial<Pick<SaleItemRecord, "refundedQuantity" | "refundedAt" | "refundReason">>;
+
+type SeedSale = Omit<SaleRecord, "refundedAmount" | "items" | "refundEvents"> &
+  Partial<Pick<SaleRecord, "refundedAmount" | "refundedAt" | "refundReason" | "refundEvents">> & {
+    items: SeedSaleItem[];
+  };
+
+function normalizeSeedSaleItem(item: SeedSaleItem): SaleItemRecord {
+  return {
+    ...item,
+    refundedQuantity: item.refundedQuantity ?? 0,
+    refundedAt: item.refundedAt ?? null,
+    refundReason: item.refundReason ?? null,
+  };
+}
+
+function normalizeSeedSale(sale: SeedSale): SaleRecord {
+  return {
+    ...sale,
+    refundedAmount: sale.refundedAmount ?? 0,
+    refundedAt: sale.refundedAt ?? null,
+    refundReason: sale.refundReason ?? null,
+    items: sale.items.map((item) => normalizeSeedSaleItem(item)),
+    refundEvents: sale.refundEvents ?? [],
+  };
 }
 
 function resolveTierPrice(product: ProductRecord, pricingTier: ProductPricingTier) {
@@ -282,7 +316,7 @@ function createStore(): DemoStore {
     },
   ];
 
-  const sales: SaleRecord[] = [
+  const sales = [
     {
       id: "sale-001",
       branchId,
@@ -299,6 +333,9 @@ function createStore(): DemoStore {
       notes: "Bundle offer at checkout.",
       customerName: "Walk-in customer",
       createdAt: subDays(new Date(), 1).toISOString(),
+      paidAt: subDays(new Date(), 1).toISOString(),
+      refundedAt: null,
+      refundReason: null,
       items: [
         {
           id: "line-001",
@@ -351,7 +388,7 @@ function createStore(): DemoStore {
       employeeId: "user-employee",
       employeeName: "Omar Cashier",
       status: "completed",
-      paymentMethod: "card",
+      paymentMethod: "whish_money",
       paymentStatus: "paid",
       subtotal: 84,
       discountAmount: 0,
@@ -360,6 +397,9 @@ function createStore(): DemoStore {
       notes: "",
       customerName: null,
       createdAt: subDays(new Date(), 0).toISOString(),
+      paidAt: subDays(new Date(), 0).toISOString(),
+      refundedAt: null,
+      refundReason: null,
       items: [
         {
           id: "line-004",
@@ -384,7 +424,7 @@ function createStore(): DemoStore {
       employeeId: "user-admin",
       employeeName: "Rita Manager",
       status: "completed",
-      paymentMethod: "bank_transfer",
+      paymentMethod: "whish_money",
       paymentStatus: "paid",
       subtotal: 244,
       discountAmount: 0,
@@ -393,6 +433,9 @@ function createStore(): DemoStore {
       notes: "Gym wholesale replenishment.",
       customerName: "Titan Gym",
       createdAt: subDays(new Date(), 18).toISOString(),
+      paidAt: subDays(new Date(), 18).toISOString(),
+      refundedAt: null,
+      refundReason: null,
       items: [
         {
           id: "line-005",
@@ -440,6 +483,9 @@ function createStore(): DemoStore {
       notes: "Weekend in-store promo.",
       customerName: "Lina A.",
       createdAt: subDays(new Date(), 35).toISOString(),
+      paidAt: subDays(new Date(), 35).toISOString(),
+      refundedAt: null,
+      refundReason: null,
       items: [
         {
           id: "line-007",
@@ -492,7 +538,7 @@ function createStore(): DemoStore {
       employeeId: "user-employee",
       employeeName: "Omar Cashier",
       status: "completed",
-      paymentMethod: "card",
+      paymentMethod: "whish_money",
       paymentStatus: "paid",
       subtotal: 126,
       discountAmount: 6,
@@ -501,6 +547,9 @@ function createStore(): DemoStore {
       notes: "Bundle for recurring customer.",
       customerName: "Mazen K.",
       createdAt: subDays(new Date(), 52).toISOString(),
+      paidAt: subDays(new Date(), 52).toISOString(),
+      refundedAt: null,
+      refundReason: null,
       items: [
         {
           id: "line-010",
@@ -525,7 +574,7 @@ function createStore(): DemoStore {
       employeeId: "user-admin",
       employeeName: "Rita Manager",
       status: "completed",
-      paymentMethod: "bank_transfer",
+      paymentMethod: "whish_money",
       paymentStatus: "paid",
       subtotal: 166,
       discountAmount: 0,
@@ -534,6 +583,9 @@ function createStore(): DemoStore {
       notes: "Wholesale vitamins and bars order.",
       customerName: "Powerhouse Fitness",
       createdAt: subDays(new Date(), 83).toISOString(),
+      paidAt: subDays(new Date(), 83).toISOString(),
+      refundedAt: null,
+      refundReason: null,
       items: [
         {
           id: "line-011",
@@ -581,6 +633,9 @@ function createStore(): DemoStore {
       notes: "Back-to-gym promotion.",
       customerName: "Sara N.",
       createdAt: subDays(new Date(), 110).toISOString(),
+      paidAt: subDays(new Date(), 110).toISOString(),
+      refundedAt: null,
+      refundReason: null,
       items: [
         {
           id: "line-013",
@@ -612,7 +667,7 @@ function createStore(): DemoStore {
         },
       ],
     },
-  ];
+  ] satisfies SeedSale[];
 
   const expenses: ExpenseRecord[] = [
     {
@@ -775,7 +830,7 @@ function createStore(): DemoStore {
     employees,
     products,
     stockMovements,
-    sales,
+    sales: sales.map((sale) => normalizeSeedSale(sale)),
     alerts,
   };
 }
@@ -800,12 +855,16 @@ export function getDailySalesPoints(): DailySalesPoint[] {
     const targetDate = subDays(today, 6 - index);
     const dayKey = targetDate.toISOString().slice(0, 10);
     const daySales = store.sales.filter(
-      (sale) => sale.status === "completed" && sale.createdAt.slice(0, 10) === dayKey,
+      (sale) =>
+        sale.status === "completed" &&
+        isRefundableStatus(sale.paymentStatus) &&
+        getSaleNetTotal(sale) > 0 &&
+        (sale.paidAt ?? sale.createdAt).slice(0, 10) === dayKey,
     );
 
     return {
       label: targetDate.toLocaleDateString("en-US", { weekday: "short" }),
-      revenue: daySales.reduce((sum, sale) => sum + sale.totalAmount, 0),
+      revenue: daySales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0),
       transactions: daySales.length,
     };
   });
@@ -824,7 +883,7 @@ export function getDemoSnapshot(session: AppSession): DashboardSnapshot {
     summary,
     salesTrend: getDailySalesPoints(),
     products: [...store.products],
-    sales: [...store.sales].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    sales: [...store.sales].sort((a, b) => getSaleSortDate(b).localeCompare(getSaleSortDate(a))),
     employees: [...store.employees],
     suppliers: [...store.suppliers],
     expenses: [...store.expenses],
@@ -922,7 +981,7 @@ export function upsertDemoProduct(input: ProductMutationInput) {
   return nextProduct;
 }
 
-export function archiveDemoProduct(productId: string) {
+export function deleteDemoProduct(productId: string) {
   const store = getDemoStore();
   const product = store.products.find((item) => item.id === productId);
 
@@ -930,10 +989,21 @@ export function archiveDemoProduct(productId: string) {
     throw new Error("Product not found.");
   }
 
-  product.isActive = false;
-  product.archivedAt = nowIso();
-  product.updatedAt = nowIso();
-  return product;
+  const hasSalesHistory = store.sales.some((sale) =>
+    sale.items.some((item) => item.productId === productId),
+  );
+
+  if (hasSalesHistory) {
+    throw new Error(
+      "This product has sales history and cannot be deleted. Delete only products that were never sold.",
+    );
+  }
+
+  store.products = store.products.filter((item) => item.id !== productId);
+  store.stockMovements = store.stockMovements.filter((movement) => movement.productId !== productId);
+  store.alerts = store.alerts.filter((alert) => alert.productId !== productId);
+
+  return { productId };
 }
 
 export function adjustDemoInventory(input: InventoryAdjustmentInput, actor: AppSession) {
@@ -1019,6 +1089,9 @@ function buildSaleItems(input: PosSaleInput, store: DemoStore) {
         discountAmount: item.discountAmount,
         lineTotal,
         lineProfit,
+        refundedQuantity: 0,
+        refundedAt: null,
+        refundReason: null,
       } satisfies SaleItemRecord,
       product,
     };
@@ -1030,10 +1103,12 @@ export function createDemoSale(input: PosSaleInput, actor: AppSession) {
   const items = buildSaleItems(input, store);
   const subtotal = items.reduce((sum, item) => sum + item.line.unitPrice * item.line.quantity, 0);
   const lineDiscounts = items.reduce((sum, item) => sum + item.line.discountAmount, 0);
-  const extraDiscount = input.discountAmount ?? 0;
-  const totalDiscount = lineDiscounts + extraDiscount;
+  const totalDiscount = lineDiscounts;
   const totalAmount = subtotal - totalDiscount;
   const saleIndex = store.sales.length + 1;
+  const paymentStatus = input.paymentStatus ?? "paid";
+  const createdAt = nowIso();
+  const paidAt = paymentStatus === "paid" ? createdAt : null;
 
   const sale: SaleRecord = {
     id: `sale-${nanoid(8)}`,
@@ -1043,15 +1118,20 @@ export function createDemoSale(input: PosSaleInput, actor: AppSession) {
     employeeName: actor.fullName,
     status: "completed",
     paymentMethod: input.paymentMethod,
-    paymentStatus: "paid",
+    paymentStatus,
     subtotal,
     discountAmount: totalDiscount,
     taxAmount: 0,
     totalAmount,
     notes: input.notes ?? "",
     customerName: input.customerName ?? null,
-    createdAt: nowIso(),
+    createdAt,
+    paidAt,
+    refundedAmount: 0,
+    refundedAt: null,
+    refundReason: null,
     items: items.map((item) => item.line),
+    refundEvents: [],
   };
 
   items.forEach(({ product, line }) => {
@@ -1095,8 +1175,188 @@ export function createDemoSale(input: PosSaleInput, actor: AppSession) {
   if (employee) {
     employee.transactionCount += 1;
     employee.totalSales += sale.items.reduce((sum, item) => sum + item.quantity, 0);
-    employee.totalRevenue += sale.totalAmount;
+    if (sale.paymentStatus === "paid") {
+      employee.totalRevenue += sale.totalAmount;
+    }
     employee.lastLoginAt = nowIso();
+  }
+
+  return sale;
+}
+
+export function settleDemoPendingSale(saleId: string) {
+  const store = getDemoStore();
+  const sale = store.sales.find((entry) => entry.id === saleId);
+
+  if (!sale || sale.status !== "completed" || sale.paymentStatus !== "pending") {
+    throw new Error("Pending sale not found.");
+  }
+
+  sale.paymentStatus = "paid";
+  sale.paidAt = nowIso();
+  sale.refundedAmount = 0;
+  sale.refundedAt = null;
+  sale.refundReason = null;
+
+  const employee = store.employees.find((entry) => entry.id === sale.employeeId);
+  if (employee) {
+    employee.totalRevenue += sale.totalAmount;
+  }
+
+  return sale;
+}
+
+export function voidDemoPendingSale(saleId: string) {
+  const store = getDemoStore();
+  const sale = store.sales.find((entry) => entry.id === saleId);
+
+  if (!sale || sale.status !== "completed" || sale.paymentStatus !== "pending") {
+    throw new Error("Pending sale not found.");
+  }
+
+  sale.items.forEach((line) => {
+    const product = store.products.find((entry) => entry.id === line.productId);
+    if (!product) {
+      return;
+    }
+
+    const previousQuantity = product.stockQuantity;
+    product.stockQuantity += line.quantity;
+    product.updatedAt = nowIso();
+
+    store.stockMovements.unshift({
+      id: `move-${nanoid(8)}`,
+      productId: product.id,
+      productName: product.name,
+      movementType: "void",
+      quantityDelta: line.quantity,
+      previousQuantity,
+      newQuantity: product.stockQuantity,
+      note: `Voided unpaid sale ${sale.invoiceNumber}`,
+      performedBy: sale.employeeId,
+      performedByName: sale.employeeName,
+      createdAt: nowIso(),
+    });
+  });
+
+  sale.status = "cancelled";
+  sale.paymentStatus = "void";
+  sale.paidAt = null;
+  sale.refundedAmount = 0;
+  sale.refundedAt = null;
+  sale.refundReason = null;
+
+  const employee = store.employees.find((entry) => entry.id === sale.employeeId);
+  if (employee) {
+    employee.transactionCount = Math.max(0, employee.transactionCount - 1);
+    employee.totalSales = Math.max(
+      0,
+      employee.totalSales - sale.items.reduce((sum, item) => sum + item.quantity, 0),
+    );
+  }
+
+  return sale;
+}
+
+export function refundDemoPaidSale(
+  saleId: string,
+  input: SaleRefundInput,
+  actor: AppSession,
+) {
+  const store = getDemoStore();
+  const sale = store.sales.find((entry) => entry.id === saleId);
+
+  if (!sale || sale.status !== "completed" || !isRefundableStatus(sale.paymentStatus)) {
+    throw new Error("Only paid or partially refunded completed orders can be refunded.");
+  }
+
+  const refundableItems = sale.items.filter((line) => getRefundableQuantity(line) > 0);
+  if (refundableItems.length === 0) {
+    throw new Error("This order has no refundable products remaining.");
+  }
+
+  const targetItems =
+    input.scope === "item"
+      ? refundableItems.filter((line) => line.id === input.saleItemId)
+      : refundableItems;
+
+  if (targetItems.length === 0) {
+    throw new Error("The selected product line is not refundable.");
+  }
+
+  const trimmedReason = input.reason?.trim() || undefined;
+  const refundAt = nowIso();
+  const previousRefundedAmount = getSaleRefundedAmount(sale);
+  const refundQuantities = new Map(
+    targetItems.map((line) => {
+      const refundableQuantity = getRefundableQuantity(line);
+      const quantityToRefund =
+        input.scope === "item"
+          ? Math.min(Math.max(input.quantity ?? refundableQuantity, 1), refundableQuantity)
+          : refundableQuantity;
+
+      return [line.id, quantityToRefund];
+    }),
+  );
+  const refundedAmountDelta = targetItems.reduce((sum, line) => {
+    if (line.quantity <= 0) {
+      return sum;
+    }
+
+    return sum + (line.lineTotal / line.quantity) * (refundQuantities.get(line.id) ?? 0);
+  }, 0);
+  const refundedUnitsDelta = targetItems.reduce(
+    (sum, line) => sum + (refundQuantities.get(line.id) ?? 0),
+    0,
+  );
+  const wasCountedTransaction = sale.paymentStatus === "paid" || sale.paymentStatus === "partially_refunded";
+
+  targetItems.forEach((line) => {
+    const product = store.products.find((entry) => entry.id === line.productId);
+    if (!product) {
+      return;
+    }
+
+    const refundableQuantity = refundQuantities.get(line.id) ?? 0;
+    const previousQuantity = product.stockQuantity;
+    product.stockQuantity += refundableQuantity;
+    product.updatedAt = nowIso();
+
+    store.stockMovements.unshift({
+      id: `move-${nanoid(8)}`,
+      productId: product.id,
+      productName: product.name,
+      movementType: "return",
+      quantityDelta: refundableQuantity,
+      previousQuantity,
+      newQuantity: product.stockQuantity,
+      note: trimmedReason
+        ? `Refunded sale ${sale.invoiceNumber}: ${trimmedReason}`
+        : `Refunded sale ${sale.invoiceNumber}`,
+      performedBy: actor.userId,
+      performedByName: actor.fullName,
+      createdAt: refundAt,
+    });
+
+    line.refundedQuantity = Math.min(line.quantity, line.refundedQuantity + refundableQuantity);
+    line.refundedAt = refundAt;
+    line.refundReason = trimmedReason ?? null;
+  });
+
+  sale.refundedAmount = Math.min(sale.totalAmount, previousRefundedAmount + refundedAmountDelta);
+  sale.paymentStatus = sale.items.every((line) => getRefundableQuantity(line) === 0)
+    ? "refunded"
+    : "partially_refunded";
+  sale.refundedAt = refundAt;
+  sale.refundReason = trimmedReason ?? sale.refundReason ?? null;
+
+  const employee = store.employees.find((entry) => entry.id === sale.employeeId);
+  if (employee) {
+    employee.totalRevenue = Math.max(0, employee.totalRevenue - refundedAmountDelta);
+    employee.totalSales = Math.max(0, employee.totalSales - refundedUnitsDelta);
+    if (wasCountedTransaction && sale.paymentStatus === "refunded") {
+      employee.transactionCount = Math.max(0, employee.transactionCount - 1);
+    }
   }
 
   return sale;

@@ -20,19 +20,6 @@ export const metadata: Metadata = {
     "Modern POS and inventory platform for supplement retail powered by Next.js and Supabase.",
 };
 
-const themeInitializer = `
-  (function () {
-    try {
-      var theme = window.localStorage.getItem("proteinos-theme") || "light";
-      document.documentElement.dataset.theme = theme;
-      document.documentElement.style.colorScheme = theme;
-    } catch (error) {
-      document.documentElement.dataset.theme = "light";
-      document.documentElement.style.colorScheme = "light";
-    }
-  })();
-`;
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -47,7 +34,6 @@ export default function RootLayout({
       className={`${manrope.variable} ${spaceGrotesk.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)]">
-        <script dangerouslySetInnerHTML={{ __html: themeInitializer }} />
         <ThemeProvider>
           {children}
           <AppToaster />

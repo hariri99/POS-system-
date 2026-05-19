@@ -12,13 +12,12 @@ export default async function AdminProductsPage() {
       <PageHeader
         eyebrow="Catalog"
         title="Products and variants"
-        description="Create, adjust, archive, and price supplement inventory with clean merchandising details, stock thresholds, and expiry tracking."
+        description="Create, adjust, delete, and price supplement inventory with clean merchandising details, stock thresholds, and expiry tracking."
         badge={`${snapshot.products.length} products`}
       />
       <ProductManager
         products={snapshot.products}
         categories={snapshot.categories}
-        suppliers={snapshot.suppliers}
       />
     </div>
   );

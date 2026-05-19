@@ -42,8 +42,36 @@ export const posSaleSchema = z.object({
       }),
     )
     .min(1),
-  paymentMethod: z.enum(["cash", "card", "bank_transfer", "mixed"]),
+  paymentMethod: z.enum(["cash", "whish_money"]),
+  paymentStatus: z.enum(["paid", "pending"]).default("paid"),
   notes: z.string().optional(),
   customerName: z.string().optional(),
-  discountAmount: z.coerce.number().min(0).optional(),
+});
+
+export const saleRefundSchema = z.object({
+  scope: z.enum(["order", "item"]).default("order"),
+  saleItemId: z.string().min(1).optional(),
+  quantity: z.coerce.number().int().positive().optional(),
+  reason: z
+    .string()
+    .trim()
+    .max(240)
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
+}).superRefine((value, context) => {
+  if (value.scope === "item" && !value.saleItemId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["saleItemId"],
+      message: "A product line must be selected for an item refund.",
+    });
+  }
+
+  if (value.scope === "item" && !value.quantity) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["quantity"],
+      message: "Choose how many units to refund.",
+    });
+  }
 });

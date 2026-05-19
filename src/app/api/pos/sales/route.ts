@@ -9,6 +9,8 @@ export async function POST(request: Request) {
     const sale = await createSale(payload, session);
     return apiSuccess(sale, "Sale completed.");
   } catch (error) {
+    console.error("[api/pos/sales] Sale request failed", error);
+
     if (error instanceof Error) {
       if (error.message === "UNAUTHORIZED") {
         return apiError("Please sign in.", 401);
@@ -24,4 +26,3 @@ export async function POST(request: Request) {
     return apiError("Unexpected error while processing sale.", 500);
   }
 }
-

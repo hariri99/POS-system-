@@ -21,6 +21,7 @@
   --brand-soft: #4f83ff;
   --brand-ink: #eff6ff;
   --brand-surface: rgba(37, 99, 235, 0.09);
+  --brand-surface-strong: rgba(37, 99, 235, 0.16);
   --info: #2563eb;
   --success: #15803d;
   --warning: #b45309;
@@ -61,6 +62,7 @@
   --brand-soft: #93c5fd;
   --brand-ink: #eff6ff;
   --brand-surface: rgba(59, 130, 246, 0.16);
+  --brand-surface-strong: rgba(59, 130, 246, 0.24);
   --info: #60a5fa;
   --success: #4ade80;
   --warning: #f59e0b;

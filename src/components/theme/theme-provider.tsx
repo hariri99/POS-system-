@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type Dispatch,
@@ -30,27 +31,30 @@ function resolveThemeFromDom(): Theme {
   return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
 
+function resolveThemeFromStorage() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const storedTheme = window.localStorage.getItem(STORAGE_KEY);
+    return storedTheme === "light" || storedTheme === "dark" ? storedTheme : null;
+  } catch {
+    return null;
+  }
+}
+
 function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(resolveThemeFromDom);
+  const [theme, setTheme] = useState<Theme>(() => resolveThemeFromStorage() ?? resolveThemeFromDom());
 
-  useEffect(() => {
-    try {
-      const storedTheme = window.localStorage.getItem(STORAGE_KEY);
-      if (storedTheme === "light" || storedTheme === "dark") {
-        setTheme(storedTheme);
-        return;
-      }
-    } catch {
-      // Ignore storage issues and fall back to the DOM/default theme.
-    }
-
-    setTheme(resolveThemeFromDom());
-  }, []);
+  useLayoutEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     applyTheme(theme);

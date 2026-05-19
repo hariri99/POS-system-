@@ -11,13 +11,14 @@ export default function LoginPage() {
           <div>
             <p className="section-kicker">Access gateway</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-[var(--heading)]">
-              Authenticate into the store platform
+              Role-based staff authentication
             </h1>
           </div>
           <div className="flex items-start gap-4">
             <div className="max-w-xl text-sm leading-7 text-[var(--muted-foreground)]">
-              Sign into the same premium operations environment used for POS, inventory, staff
-              monitoring, and remote ownership oversight.
+              One professional login screen for admins and employees. Each staff member signs in
+              with a login name and password, then lands in the correct workspace automatically.
+              Demo access is no longer available.
             </div>
             <ThemeToggle compact />
           </div>

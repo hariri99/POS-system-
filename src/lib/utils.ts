@@ -14,6 +14,21 @@ export function formatCurrency(value: number) {
   }).format(value);
 }
 
+export function formatPaymentMethod(method: string) {
+  switch (method) {
+    case "cash":
+      return "Cash";
+    case "whish_money":
+      return "Whish Money";
+    case "bank_transfer":
+      return "Bank transfer";
+    default:
+      return method
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (character) => character.toUpperCase());
+  }
+}
+
 export function formatPercent(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "percent",

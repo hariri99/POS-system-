@@ -33,6 +33,7 @@ interface PosStore {
   removeProduct: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
   updatePricingTier: (productId: string, pricingTier: ProductPricingTier) => void;
+  updateUnitPrice: (productId: string, unitPrice: number) => void;
   updateDiscount: (productId: string, discountAmount: number) => void;
   clearCart: () => void;
 }
@@ -99,6 +100,17 @@ export const usePosStore = create<PosStore>((set) => ({
               ...item,
               pricingTier,
               unitPrice: resolveCartPriceForTier(item, pricingTier),
+            }
+          : item,
+      ),
+    })),
+  updateUnitPrice: (productId, unitPrice) =>
+    set((state) => ({
+      cart: state.cart.map((item) =>
+        item.productId === productId
+          ? {
+              ...item,
+              unitPrice: Math.max(0, unitPrice),
             }
           : item,
       ),

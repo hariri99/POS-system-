@@ -19,9 +19,12 @@ export default async function PosPage() {
           description="Search products fast, update quantities instantly, and complete inventory-aware sales with minimal clicks."
           badge={`${snapshot.products.length} sellable products`}
         />
-        <PosTerminal products={snapshot.products} recentSales={snapshot.sales} />
+        <PosTerminal
+          products={snapshot.products}
+          recentSales={snapshot.sales}
+          canViewAdvancedPricing={session.role === "admin"}
+        />
       </div>
     </AppShell>
   );
 }
-

@@ -8,9 +8,28 @@ export const env = {
     process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY,
 };
 
-export const hasSupabaseEnv = Boolean(env.supabaseUrl && env.supabaseAnonKey);
+function isValidHttpUrl(value: string | undefined) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export const hasSupabaseEnv = Boolean(isValidHttpUrl(env.supabaseUrl) && env.supabaseAnonKey);
 export const hasSupabaseServiceRole = Boolean(
-  env.supabaseUrl && env.supabaseServiceRoleKey,
+  isValidHttpUrl(env.supabaseUrl) && env.supabaseServiceRoleKey,
 );
 
-export const DEMO_SESSION_COOKIE = "protein_demo_session";
+export function assertSupabaseConfigured() {
+  if (!hasSupabaseEnv) {
+    throw new Error(
+      "Supabase is required for this app. Demo mode has been removed, so configure the live environment keys first.",
+    );
+  }
+}

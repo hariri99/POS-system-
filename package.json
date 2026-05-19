@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "verify:live": "node scripts/verify-live.mjs",
-    "create:admin": "node scripts/create-admin.mjs"
+    "create:admin": "node scripts/create-staff.mjs --role admin",
+    "create:employee": "node scripts/create-staff.mjs --role employee",
+    "create:staff": "node scripts/create-staff.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

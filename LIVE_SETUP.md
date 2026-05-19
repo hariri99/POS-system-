@@ -1,17 +1,12 @@
 # Live Setup Guide
 
-This guide is for switching ProteinOS from local demo mode to a real Supabase-backed setup with real accounts, persistent data, and production-style behavior.
+This guide is for connecting ProteinOS to a real Supabase-backed setup with real accounts, persistent data, and production-style behavior.
 
-## What “demo” means
+## Important
 
-If `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are not set in `.env.local`, the app falls back to demo mode:
+ProteinOS is now real-backend only.
 
-- fake login buttons
-- fake in-memory data
-- no persistent users
-- no real database writes
-
-The website itself is real, but the backend is not live yet.
+If `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, or `SUPABASE_SECRET_KEY` are missing from `.env.local`, the app will stop with a configuration error instead of falling back to demo data.
 
 ## Goal
 
@@ -62,14 +57,15 @@ Important:
 - do not keep these values empty
 - do not share the `SUPABASE_SECRET_KEY`
 
-## Step 4: Run the database migration
+## Step 4: Run all database migrations
 
 In the Supabase dashboard:
 
 1. Open `SQL Editor`
-2. Create a new query
-3. Copy all SQL from [supabase/migrations/20260513195000_init.sql](/c:/Users/RitaM/OneDrive/Desktop/protein%20system/supabase/migrations/20260513195000_init.sql)
-4. Run it
+2. Run every file in [supabase/migrations](/c:/Users/RitaM/OneDrive/Desktop/protein%20system/supabase/migrations) in timestamp order
+3. Create a new query for each file
+4. Copy the SQL from the file into the editor
+5. Run it before moving to the next file
 
 This creates:
 
@@ -79,6 +75,13 @@ This creates:
 - policies
 - functions
 - storage bucket rules
+- later schema upgrades such as pay-later orders and partial product refunds
+
+Important:
+
+- do not stop after only `20260513195000_init.sql`
+- the refund workflow requires [20260518123000_partial_product_refunds.sql](/c:/Users/RitaM/OneDrive/Desktop/protein%20system/supabase/migrations/20260518123000_partial_product_refunds.sql)
+- if that migration is missing, refunds still work in compatibility mode, but applying it is still recommended for native database support
 
 ## Step 5: Run the seed data
 
@@ -111,6 +114,7 @@ If everything is connected correctly, the script will confirm:
 - Supabase is reachable
 - your tables exist
 - catalog view is readable
+- refund handling is either fully migrated or running in compatibility mode
 - storage bucket status is visible
 
 ## Step 7: Create your real admin account
@@ -154,7 +158,7 @@ Then start it again:
 2. Enter the email and password you used in Step 7
 3. Click `Continue with Supabase Auth`
 
-You should now enter the real admin dashboard, not the demo flow.
+You should now enter the real admin dashboard.
 
 ## Step 10: Confirm it is really live
 
@@ -165,6 +169,8 @@ After logging in:
 3. Confirm the product still exists
 4. Make a sale
 5. Check that inventory changes remain after refresh
+6. Verify that whole-order refunds work
+7. Verify that single-product refunds work
 
 If those changes persist, you are using the real backend.
 
@@ -184,6 +190,6 @@ Before selling this system to a client, you should still do:
 2. Point `NEXT_PUBLIC_APP_URL` to the Vercel domain
 3. Add production environment variables in Vercel
 4. Create a production Supabase project
-5. Re-run migration and seed there if needed
+5. Re-run every migration and then seed if needed
 6. Create production admin accounts
-7. Test product creation, sales, inventory deduction, and login/logout one more time
+7. Test product creation, sales, inventory deduction, full refunds, single-product refunds, and login/logout one more time

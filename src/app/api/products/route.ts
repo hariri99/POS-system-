@@ -24,6 +24,8 @@ export async function POST(request: Request) {
 
     return apiSuccess(product, "Product saved.");
   } catch (error) {
+    console.error("[api/products] Product save failed", error);
+
     if (error instanceof Error) {
       if (error.message === "UNAUTHORIZED") {
         return apiError("Please sign in.", 401);

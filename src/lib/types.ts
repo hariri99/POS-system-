@@ -1,8 +1,9 @@
 export type UserRole = "admin" | "employee";
 export type SessionMode = "supabase" | "demo";
-export type PaymentMethod = "cash" | "card" | "bank_transfer" | "mixed";
-export type PaymentStatus = "paid" | "pending" | "refunded" | "void";
+export type PaymentMethod = "cash" | "whish_money";
+export type PaymentStatus = "paid" | "pending" | "partially_refunded" | "refunded" | "void";
 export type SaleStatus = "completed" | "cancelled" | "draft";
+export type SaleRefundScope = "order" | "item";
 export type ProductPricingTier = "retail" | "wholesale" | "discount";
 export type StockMovementType =
   | "restock"
@@ -112,6 +113,26 @@ export interface SaleItemRecord {
   discountAmount: number;
   lineTotal: number;
   lineProfit: number;
+  refundedQuantity: number;
+  refundedAt: string | null;
+  refundReason: string | null;
+}
+
+export interface RefundEventItemRecord {
+  saleItemId: string;
+  productName: string;
+  quantity: number;
+  amount: number;
+}
+
+export interface RefundEventRecord {
+  id: string;
+  actorId: string | null;
+  actorName: string;
+  createdAt: string;
+  reason: string | null;
+  amount: number;
+  items: RefundEventItemRecord[];
 }
 
 export interface SaleRecord {
@@ -130,7 +151,19 @@ export interface SaleRecord {
   notes: string;
   customerName: string | null;
   createdAt: string;
+  paidAt: string | null;
+  refundedAmount: number;
+  refundedAt: string | null;
+  refundReason: string | null;
   items: SaleItemRecord[];
+  refundEvents: RefundEventRecord[];
+}
+
+export interface SaleRefundInput {
+  scope: SaleRefundScope;
+  saleItemId?: string;
+  quantity?: number;
+  reason?: string;
 }
 
 export interface EmployeeRecord {
@@ -231,9 +264,9 @@ export interface PosSaleInput {
     discountAmount: number;
   }>;
   paymentMethod: PaymentMethod;
+  paymentStatus: "paid" | "pending";
   notes?: string;
   customerName?: string;
-  discountAmount?: number;
 }
 
 export interface ProductMutationInput {

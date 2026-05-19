@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  Archive,
   Boxes,
   ClipboardPenLine,
   ImagePlus,
@@ -12,6 +11,7 @@ import {
   Plus,
   Search,
   Tags,
+  Trash2,
   TriangleAlert,
   Wallet,
   X,
@@ -22,13 +22,12 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { type CategoryRecord, type ProductRecord, type SupplierRecord } from "@/lib/types";
+import { type CategoryRecord, type ProductRecord } from "@/lib/types";
 import { cn, formatCurrency, formatDate, formatPercent } from "@/lib/utils";
 
 interface ProductManagerProps {
   products: ProductRecord[];
   categories: CategoryRecord[];
-  suppliers: SupplierRecord[];
 }
 
 type ProductFormState = {
@@ -75,7 +74,7 @@ const initialForm: ProductFormState = {
   sizeLabel: "",
   sku: "",
   barcode: "",
-  salePrice: "0",
+  salePrice: "",
   wholesalePrice: "0",
   discountPrice: "",
   costPrice: "0",
@@ -87,6 +86,8 @@ const initialForm: ProductFormState = {
 };
 
 function buildFormFromProduct(product: ProductRecord): ProductFormState {
+  const visibleSalePrice = product.wholesalePrice > 0 ? product.wholesalePrice : product.salePrice;
+
   return {
     id: product.id,
     name: product.name,
@@ -98,8 +99,8 @@ function buildFormFromProduct(product: ProductRecord): ProductFormState {
     sizeLabel: product.sizeLabel,
     sku: product.sku,
     barcode: product.barcode,
-    salePrice: String(product.salePrice),
-    wholesalePrice: String(product.wholesalePrice),
+    salePrice: String(visibleSalePrice),
+    wholesalePrice: String(visibleSalePrice),
     discountPrice: product.discountPrice != null ? String(product.discountPrice) : "",
     costPrice: String(product.costPrice),
     stockQuantity: String(product.stockQuantity),
@@ -108,6 +109,14 @@ function buildFormFromProduct(product: ProductRecord): ProductFormState {
     imageUrl: product.imageUrl ?? "",
     isActive: product.isActive,
   };
+}
+
+function normalizeMoneyInput(value: string) {
+  if (value.trim() === "") {
+    return 0;
+  }
+
+  return Math.round(Number(value) * 100) / 100;
 }
 
 function getProductHealth(product: ProductRecord) {
@@ -202,7 +211,6 @@ function DrawerSection({
 export function ProductManager({
   products: initialProducts,
   categories,
-  suppliers,
 }: ProductManagerProps) {
   const [products, setProducts] = useState(initialProducts);
   const [query, setQuery] = useState("");
@@ -343,10 +351,6 @@ export function ProductManager({
     0,
   );
   const categoryCount = new Set(products.map((product) => product.categoryId)).size;
-  const selectedActiveIds = selectedIds.filter((id) =>
-    products.some((product) => product.id === id && product.isActive),
-  );
-
   function openCreateDrawer() {
     setDrawerMode("create");
     setForm(initialForm);
@@ -437,7 +441,7 @@ export function ProductManager({
     await uploadImage(file);
   }
 
-  async function archiveProducts(productIds: string[]) {
+  async function deleteProducts(productIds: string[]) {
     if (productIds.length === 0) {
       return;
     }
@@ -446,39 +450,62 @@ export function ProductManager({
     setDrawerMessage(null);
     setActiveMenuId(null);
 
-    startTransition(async () => {
-      try {
-        const updatedProducts = await Promise.all(
-          productIds.map(async (productId) => {
-            const response = await fetch(`/api/products/${productId}`, {
-              method: "DELETE",
-            });
-            const payload = await response.json().catch(() => null);
+    try {
+      const deletionResults = await Promise.allSettled(
+        productIds.map(async (productId) => {
+          const response = await fetch(`/api/products/${productId}`, {
+            method: "DELETE",
+          });
+          const payload = await response.json().catch(() => null);
 
-            if (!response.ok || !payload?.success) {
-              throw new Error(payload?.message ?? "Unable to archive product.");
-            }
+          if (!response.ok || !payload?.success) {
+            throw new Error(payload?.message ?? "Unable to delete product.");
+          }
 
-            return payload.data as ProductRecord;
-          }),
-        );
+          return payload.data as { productId: string };
+        }),
+      );
 
-        setProducts((current) =>
-          current.map((product) => {
-            const updated = updatedProducts.find((candidate) => candidate.id === product.id);
-            return updated ?? product;
-          }),
-        );
-        setSelectedIds((current) => current.filter((id) => !productIds.includes(id)));
-        setFlashMessage(
-          productIds.length === 1 ? "Product archived." : `${productIds.length} products archived.`,
-        );
-      } catch (error) {
-        setFlashMessage(
-          error instanceof Error ? error.message : "Unexpected error while archiving products.",
-        );
-      }
-    });
+      const deletedIds = deletionResults.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value.productId] : [],
+      );
+      const failureMessages = Array.from(
+        new Set(
+          deletionResults.flatMap((result) =>
+            result.status === "rejected"
+              ? [result.reason instanceof Error ? result.reason.message : "Unable to delete product."]
+              : [],
+          ),
+        ),
+      );
+
+      startTransition(() => {
+        if (deletedIds.length > 0) {
+          setProducts((current) => current.filter((product) => !deletedIds.includes(product.id)));
+          setSelectedIds((current) => current.filter((id) => !deletedIds.includes(id)));
+        }
+
+        if (deletedIds.length > 0 && failureMessages.length === 0) {
+          setFlashMessage(
+            deletedIds.length === 1 ? "Product deleted." : `${deletedIds.length} products deleted.`,
+          );
+          return;
+        }
+
+        if (deletedIds.length > 0 && failureMessages.length > 0) {
+          setFlashMessage(
+            `${deletedIds.length} product${deletedIds.length === 1 ? "" : "s"} deleted. ${failureMessages[0]}`,
+          );
+          return;
+        }
+
+        setFlashMessage(failureMessages[0] ?? "Unable to delete product.");
+      });
+    } catch (error) {
+      setFlashMessage(
+        error instanceof Error ? error.message : "Unexpected error while deleting products.",
+      );
+    }
   }
 
   async function submitProduct(event: React.FormEvent<HTMLFormElement>) {
@@ -486,33 +513,37 @@ export function ProductManager({
     setDrawerMessage(null);
     setFlashMessage(null);
 
-    startTransition(async () => {
-      try {
-        const response = await fetch("/api/products", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+    try {
+      const response = await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: (() => {
+          const visibleSalePrice = normalizeMoneyInput(form.wholesalePrice);
+
+          return JSON.stringify({
             ...form,
-            salePrice: Number(form.salePrice),
-            wholesalePrice: Number(form.wholesalePrice),
-            discountPrice: form.discountPrice.trim() === "" ? null : Number(form.discountPrice),
-            costPrice: Number(form.costPrice),
+            salePrice: visibleSalePrice,
+            wholesalePrice: visibleSalePrice,
+            discountPrice: form.discountPrice.trim() === "" ? null : normalizeMoneyInput(form.discountPrice),
+            costPrice: normalizeMoneyInput(form.costPrice),
             stockQuantity: Number(form.stockQuantity),
             reorderPoint: Number(form.reorderPoint),
             expiryDate: form.expiryDate || null,
             supplierId: form.supplierId || null,
             imageUrl: form.imageUrl || null,
-          }),
-        });
+          });
+        })(),
+      });
 
-        const payload = await response.json().catch(() => null);
+      const payload = await response.json().catch(() => null);
 
-        if (!response.ok || !payload?.success) {
-          setDrawerMessage(payload?.message ?? "Unable to save product.");
-          return;
-        }
+      if (!response.ok || !payload?.success) {
+        setDrawerMessage(payload?.message ?? "Unable to save product.");
+        return;
+      }
 
-        const nextProduct = payload.data as ProductRecord;
+      const nextProduct = payload.data as ProductRecord;
+      startTransition(() => {
         setProducts((current) => {
           const existing = current.find((product) => product.id === nextProduct.id);
           return existing
@@ -525,10 +556,10 @@ export function ProductManager({
         setDrawerMode("create");
         setForm(initialForm);
         setPreviewUrl("");
-      } catch {
-        setDrawerMessage("Unexpected error while saving product.");
-      }
-    });
+      });
+    } catch {
+      setDrawerMessage("Unexpected error while saving product.");
+    }
   }
 
   return (
@@ -554,15 +585,15 @@ export function ProductManager({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {selectedActiveIds.length > 0 ? (
+            {selectedIds.length > 0 ? (
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => void archiveProducts(selectedActiveIds)}
+                onClick={() => void deleteProducts(selectedIds)}
                 disabled={isPending}
               >
-                <Archive className="size-4" />
-                Archive selected
+                <Trash2 className="size-4" />
+                Delete selected
               </Button>
             ) : null}
             <Button type="button" onClick={openCreateDrawer}>
@@ -577,7 +608,7 @@ export function ProductManager({
             icon={<Layers3 className="size-4" />}
             label="Total products"
             value={String(products.length)}
-            helper="Full active and archived catalog"
+            helper="Full catalog snapshot"
           />
           <ProductStat
             icon={<TriangleAlert className="size-4" />}
@@ -703,18 +734,18 @@ export function ProductManager({
                     {selectedIds.length} selected
                   </Badge>
                   <p className="text-[var(--muted-foreground)]">
-                    Use bulk archive for discontinued or inactive lines.
+                    Delete unused products from the catalog in one step.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => void archiveProducts(selectedActiveIds)}
-                    disabled={selectedActiveIds.length === 0 || isPending}
+                    onClick={() => void deleteProducts(selectedIds)}
+                    disabled={selectedIds.length === 0 || isPending}
                   >
-                    <Archive className="size-4" />
-                    Archive selected
+                    <Trash2 className="size-4" />
+                    Delete selected
                   </Button>
                   <Button type="button" variant="ghost" onClick={() => setSelectedIds([])}>
                     Clear selection
@@ -889,10 +920,10 @@ export function ProductManager({
                             <button
                               type="button"
                               className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm text-[var(--danger)] transition-colors hover:bg-[var(--surface-soft)] disabled:opacity-50"
-                              onClick={() => void archiveProducts([product.id])}
-                              disabled={!product.isActive || isPending}
+                              onClick={() => void deleteProducts([product.id])}
+                              disabled={isPending}
                             >
-                              Archive product
+                              Delete product
                             </button>
                           </div>
                         ) : null}
@@ -966,12 +997,9 @@ export function ProductManager({
               <div className="border-b border-[var(--border)] bg-[var(--surface)] px-5 py-4 backdrop-blur-[8px]">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className="border-[var(--border-accent)] bg-[var(--brand-surface)] text-[var(--brand)]">
-                        {drawerMode === "edit" ? "Edit product" : "New product"}
-                      </Badge>
-                      {form.isActive ? <Badge>Active catalog item</Badge> : <Badge>Archived state</Badge>}
-                    </div>
+                    <Badge className="border-[var(--border-accent)] bg-[var(--brand-surface)] text-[var(--brand)]">
+                      {drawerMode === "edit" ? "Edit product" : "New product"}
+                    </Badge>
                     <div>
                       <h3 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--heading)]">
                         {drawerMode === "edit" ? "Update product details" : "Create a product"}
@@ -1083,22 +1111,9 @@ export function ProductManager({
                     <DrawerSection
                       icon={<Wallet className="size-4" />}
                       title="Pricing"
-                      description="Define retail, wholesale, and optional discount pricing with a fast profit preview."
+                      description="Set the selling price and cost price with a quick profit preview."
                     >
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="space-y-2">
-                          <span className="field-label">Retail price</span>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={form.salePrice}
-                            onChange={(event) =>
-                              setForm((state) => ({ ...state, salePrice: event.target.value }))
-                            }
-                          />
-                        </label>
-
                         <label className="space-y-2">
                           <span className="field-label">Wholesale price</span>
                           <Input
@@ -1109,20 +1124,6 @@ export function ProductManager({
                             onChange={(event) =>
                               setForm((state) => ({ ...state, wholesalePrice: event.target.value }))
                             }
-                          />
-                        </label>
-
-                        <label className="space-y-2">
-                          <span className="field-label">Discount price</span>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={form.discountPrice}
-                            onChange={(event) =>
-                              setForm((state) => ({ ...state, discountPrice: event.target.value }))
-                            }
-                            placeholder="Optional promo price"
                           />
                         </label>
 
@@ -1139,18 +1140,10 @@ export function ProductManager({
                           />
                         </label>
 
-                        <div className="grid gap-3 sm:col-span-2 lg:grid-cols-3">
+                        <div className="grid gap-3 sm:col-span-2 lg:grid-cols-2">
                           <div className="surface-card rounded-[18px] px-4 py-3">
                             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
-                              Retail profit
-                            </p>
-                            <p className="mt-2 text-lg font-semibold text-[var(--heading)]">
-                              {formatCurrency(Number(form.salePrice || 0) - Number(form.costPrice || 0))}
-                            </p>
-                          </div>
-                          <div className="surface-card rounded-[18px] px-4 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
-                              Wholesale profit
+                              Selling profit
                             </p>
                             <p className="mt-2 text-lg font-semibold text-[var(--heading)]">
                               {formatCurrency(
@@ -1160,14 +1153,15 @@ export function ProductManager({
                           </div>
                           <div className="surface-card rounded-[18px] px-4 py-3">
                             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
-                              Discount profit
+                              Margin
                             </p>
                             <p className="mt-2 text-lg font-semibold text-[var(--heading)]">
-                              {form.discountPrice.trim() === ""
-                                ? "Optional"
-                                : formatCurrency(
-                                    Number(form.discountPrice || 0) - Number(form.costPrice || 0),
-                                  )}
+                              {formatPercent(
+                                Number(form.wholesalePrice || 0) > 0
+                                  ? (Number(form.wholesalePrice || 0) - Number(form.costPrice || 0)) /
+                                      Number(form.wholesalePrice || 0)
+                                  : 0,
+                              )}
                             </p>
                           </div>
                         </div>
@@ -1177,7 +1171,7 @@ export function ProductManager({
                     <DrawerSection
                       icon={<Boxes className="size-4" />}
                       title="Inventory"
-                      description="Track opening stock, reorder thresholds, and catalog availability."
+                      description="Track opening stock and reorder thresholds."
                     >
                       <div className="grid gap-4 sm:grid-cols-2">
                         <label className="space-y-2">
@@ -1203,48 +1197,15 @@ export function ProductManager({
                             }
                           />
                         </label>
-
-                        <label className="space-y-2 sm:col-span-2">
-                          <span className="field-label">Catalog status</span>
-                          <Select
-                            value={form.isActive ? "active" : "archived"}
-                            onChange={(event) =>
-                              setForm((state) => ({
-                                ...state,
-                                isActive: event.target.value === "active",
-                              }))
-                            }
-                          >
-                            <option value="active">Active</option>
-                            <option value="archived">Archived</option>
-                          </Select>
-                        </label>
                       </div>
                     </DrawerSection>
 
                     <DrawerSection
                       icon={<Tags className="size-4" />}
-                      title="Supplier and expiry"
-                      description="Connect the product to a supplier and apply optional expiry tracking."
+                      title="Expiry"
+                      description="Add optional expiry tracking for products that need shelf-life visibility."
                     >
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="space-y-2">
-                          <span className="field-label">Supplier</span>
-                          <Select
-                            value={form.supplierId}
-                            onChange={(event) =>
-                              setForm((state) => ({ ...state, supplierId: event.target.value }))
-                            }
-                          >
-                            <option value="">Unassigned supplier</option>
-                            {suppliers.map((supplier) => (
-                              <option key={supplier.id} value={supplier.id}>
-                                {supplier.name}
-                              </option>
-                            ))}
-                          </Select>
-                        </label>
-
+                      <div className="grid gap-4">
                         <label className="space-y-2">
                           <span className="field-label">Expiry date</span>
                           <Input

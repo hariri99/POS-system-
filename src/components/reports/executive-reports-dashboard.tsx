@@ -12,9 +12,17 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { SaleProductsPreview } from "@/components/sales/sale-products-preview";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { cn, formatCurrency, formatDate, formatDateTime, formatPercent } from "@/lib/utils";
+import {
+  cn,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatPaymentMethod,
+  formatPercent,
+} from "@/lib/utils";
 import type { ExecutiveReport } from "@/lib/reporting";
 import type { SaleRecord } from "@/lib/types";
 
@@ -572,12 +580,19 @@ export function ExecutiveReportsDashboard({
                   key={sale.id}
                   className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1">
                       <p className="font-medium text-[var(--heading)]">{sale.invoiceNumber}</p>
                       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                        {sale.employeeName} / {sale.paymentMethod}
+                        {sale.employeeName} / {formatPaymentMethod(sale.paymentMethod)}
                       </p>
+                      <SaleProductsPreview
+                        items={sale.items}
+                        maxVisible={3}
+                        compact
+                        showSummary={false}
+                        className="mt-3"
+                      />
                     </div>
                     <div className="text-right">
                       <p className="font-medium text-[var(--heading)]">

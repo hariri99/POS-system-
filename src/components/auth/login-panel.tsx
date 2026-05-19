@@ -1,64 +1,62 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 export function LoginPanel({ isSupabaseEnabled }: { isSupabaseEnabled: boolean }) {
   const router = useRouter();
-  const [email, setEmail] = useState(isSupabaseEnabled ? "" : "admin@protein.local");
-  const [password, setPassword] = useState(isSupabaseEnabled ? "" : "password123");
+  const [staffName, setStaffName] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  async function handleSupabaseLogin(event: React.FormEvent<HTMLFormElement>) {
+  async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
 
-    const supabase = createBrowserSupabaseClient();
-    if (!supabase) {
-      setError("Supabase is not configured in this environment.");
+    if (!isSupabaseEnabled) {
+      setError(
+        "Supabase is required before anyone can sign in. Demo mode has been removed, so connect the live project and create staff accounts first.",
+      );
       return;
     }
 
-    startTransition(async () => {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (signInError) {
-        setError(signInError.message);
-        return;
-      }
-
-      router.push("/admin");
-      router.refresh();
-    });
-  }
-
-  async function handleDemoLogin(role: "admin" | "employee") {
     setError(null);
-    startTransition(async () => {
-      const response = await fetch("/api/auth/demo-login", {
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/auth/staff-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role }),
+        body: JSON.stringify({
+          staffName,
+          password,
+        }),
       });
 
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        setError(payload?.message ?? "Unable to start demo session.");
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            success?: boolean;
+            message?: string;
+            data?: { redirectTo?: string };
+          }
+        | null;
+
+      if (!response.ok || !payload?.success || !payload.data?.redirectTo) {
+        setError(payload?.message ?? "Unable to sign in right now.");
         return;
       }
 
-      router.push(role === "admin" ? "/admin" : "/pos");
+      router.push(payload.data.redirectTo);
       router.refresh();
-    });
+    } catch {
+      setError("Unexpected error while signing in.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -70,49 +68,45 @@ export function LoginPanel({ isSupabaseEnabled }: { isSupabaseEnabled: boolean }
           </div>
           <div>
             <h1 className="text-3xl font-semibold tracking-[-0.03em] text-[var(--heading)]">
-              Sign into ProteinOS
+              Staff sign in
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-7 text-[var(--muted-foreground)]">
-              Admins unlock the full management layer. Employees go straight into the fast POS flow
-              with controlled permissions and live stock visibility.
+              Use your assigned staff name and password. The system automatically routes admins to
+              management and employees to the cashier terminal.
             </p>
           </div>
         </div>
 
-        {isSupabaseEnabled ? (
-          <form className="space-y-4" onSubmit={handleSupabaseLogin}>
-            <label className="block space-y-2">
-              <span className="field-label">Email</span>
-              <Input value={email} onChange={(event) => setEmail(event.target.value)} />
-            </label>
-            <label className="block space-y-2">
-              <span className="field-label">Password</span>
-              <Input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-            </label>
-            <Button className="w-full" type="submit" disabled={isPending}>
-              {isPending ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              Continue with Supabase Auth
-            </Button>
-          </form>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Button className="w-full" onClick={() => handleDemoLogin("admin")} disabled={isPending}>
-              Launch admin demo
-            </Button>
-            <Button
-              className="w-full"
-              variant="secondary"
-              onClick={() => handleDemoLogin("employee")}
-              disabled={isPending}
-            >
-              Launch cashier demo
-            </Button>
+        <form className="space-y-4" onSubmit={handleLogin}>
+          <label className="block space-y-2">
+            <span className="field-label">Staff name</span>
+            <Input
+              value={staffName}
+              onChange={(event) => setStaffName(event.target.value)}
+              autoComplete="username"
+            />
+          </label>
+          <label className="block space-y-2">
+            <span className="field-label">Password</span>
+            <Input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+          <Button className="w-full" type="submit" disabled={isSubmitting || !isSupabaseEnabled}>
+            {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
+            Continue
+          </Button>
+        </form>
+
+        {!isSupabaseEnabled ? (
+          <div className="rounded-[18px] border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-[var(--heading)] dark:text-white">
+            This app is now real-only. Configure the Supabase environment keys and create real
+            staff accounts before using the platform.
           </div>
-        )}
+        ) : null}
 
         {error ? (
           <div className="rounded-[18px] border border-[var(--danger)]/18 bg-[var(--danger)]/10 px-4 py-3 text-sm text-[var(--heading)] dark:text-white">

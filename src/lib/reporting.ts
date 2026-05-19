@@ -1,4 +1,10 @@
 import {
+  getNetLineProfit,
+  getNetLineTotal,
+  getRefundableQuantity,
+  getSaleNetTotal,
+} from "@/lib/sale-math";
+import {
   differenceInCalendarDays,
   eachMonthOfInterval,
   endOfDay,
@@ -19,7 +25,6 @@ import {
   type ExpenseRecord,
   type ProductPricingTier,
   type ProductRecord,
-  type SaleItemRecord,
   type SaleRecord,
 } from "@/lib/types";
 
@@ -138,7 +143,16 @@ export interface ExecutiveReport {
 }
 
 function getCompletedSales(sales: SaleRecord[]) {
-  return sales.filter((sale) => sale.status === "completed");
+  return sales.filter(
+    (sale) =>
+      sale.status === "completed" &&
+      (sale.paymentStatus === "paid" || sale.paymentStatus === "partially_refunded") &&
+      getSaleNetTotal(sale) > 0,
+  );
+}
+
+function getSaleTimelineDate(sale: SaleRecord) {
+  return new Date(sale.paidAt ?? sale.createdAt);
 }
 
 function getProductMaps(products: ProductRecord[]) {
@@ -150,30 +164,37 @@ function resolveLineMetrics(
   sale: SaleRecord,
   productsById: Map<string, ProductRecord>,
 ): ResolvedLineMetrics[] {
-  const baseMetrics = sale.items.map((item) => {
-    const product = productsById.get(item.productId);
-    const fallbackCost = product?.costPrice ?? 0;
-    const unitCost = "unitCost" in item && typeof item.unitCost === "number" ? item.unitCost : fallbackCost;
-    const baseRevenue = item.lineTotal;
-    const baseProfit =
-      "lineProfit" in item && typeof item.lineProfit === "number"
-        ? item.lineProfit
-        : baseRevenue - unitCost * item.quantity;
+  const baseMetrics = sale.items
+    .map((item) => {
+      const quantity = getRefundableQuantity(item);
+      if (quantity <= 0) {
+        return null;
+      }
 
-    return {
-      productId: item.productId,
-      productName: item.productName,
-      categoryName: product?.categoryName ?? "Uncategorized",
-      quantity: item.quantity,
-      cost: unitCost * item.quantity,
-      revenue: baseRevenue,
-      profit: baseProfit,
-      pricingTier:
-        "pricingTier" in item && item.pricingTier
-          ? item.pricingTier
-          : ("retail" satisfies ProductPricingTier),
-    };
-  });
+      const product = productsById.get(item.productId);
+      const fallbackCost = product?.costPrice ?? 0;
+      const unitCost = "unitCost" in item && typeof item.unitCost === "number" ? item.unitCost : fallbackCost;
+      const baseRevenue = getNetLineTotal(item);
+      const baseProfit =
+        "lineProfit" in item && typeof item.lineProfit === "number"
+          ? getNetLineProfit(item)
+          : baseRevenue - unitCost * quantity;
+
+      return {
+        productId: item.productId,
+        productName: item.productName,
+        categoryName: product?.categoryName ?? "Uncategorized",
+        quantity,
+        cost: unitCost * quantity,
+        revenue: baseRevenue,
+        profit: baseProfit,
+        pricingTier:
+          "pricingTier" in item && item.pricingTier
+            ? item.pricingTier
+            : ("retail" satisfies ProductPricingTier),
+      };
+    })
+    .filter((line): line is ResolvedLineMetrics => line !== null);
 
   const lineDiscountTotal = sale.items.reduce((sum, item) => sum + item.discountAmount, 0);
   const extraDiscount = Math.max(0, sale.discountAmount - lineDiscountTotal);
@@ -225,15 +246,15 @@ export function buildDashboardSummary({
   const monthStart = startOfMonth(new Date());
   const monthEnd = endOfMonth(new Date());
 
-  const todaySales = completedSales.filter((sale) => new Date(sale.createdAt) >= todayStart);
+  const settledTodaySales = completedSales.filter((sale) => getSaleTimelineDate(sale) >= todayStart);
   const weekSales = completedSales.filter((sale) =>
-    isWithinInterval(new Date(sale.createdAt), { start: weekStart, end: weekEnd }),
+    isWithinInterval(getSaleTimelineDate(sale), { start: weekStart, end: weekEnd }),
   );
   const monthSales = completedSales.filter((sale) =>
-    isWithinInterval(new Date(sale.createdAt), { start: monthStart, end: monthEnd }),
+    isWithinInterval(getSaleTimelineDate(sale), { start: monthStart, end: monthEnd }),
   );
 
-  const todayProfit = todaySales.reduce(
+  const todayProfit = settledTodaySales.reduce(
     (sum, sale) =>
       sum +
       resolveLineMetrics(sale, productsById).reduce((lineSum, line) => lineSum + line.profit, 0),
@@ -252,8 +273,8 @@ export function buildDashboardSummary({
     0,
   );
 
-  const todayRevenue = todaySales.reduce((sum, sale) => sum + sale.totalAmount, 0);
-  const todayTransactions = todaySales.length;
+  const todayRevenue = settledTodaySales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0);
+  const todayTransactions = settledTodaySales.length;
   const monthlyExpenses = sumExpensesInInterval(expenses, monthStart, monthEnd);
 
   return {
@@ -289,19 +310,19 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
   const currentMonthEnd = endOfMonth(now);
 
   const currentWeekSales = completedSales.filter((sale) =>
-    isWithinInterval(new Date(sale.createdAt), {
+    isWithinInterval(getSaleTimelineDate(sale), {
       start: currentWeekStart,
       end: endOfWeek(now, { weekStartsOn: 1 }),
     }),
   );
   const previousWeekSales = completedSales.filter((sale) =>
-    isWithinInterval(new Date(sale.createdAt), {
+    isWithinInterval(getSaleTimelineDate(sale), {
       start: previousWeekStart,
       end: previousWeekEnd,
     }),
   );
   const currentMonthSales = completedSales.filter((sale) =>
-    isWithinInterval(new Date(sale.createdAt), { start: currentMonthStart, end: currentMonthEnd }),
+    isWithinInterval(getSaleTimelineDate(sale), { start: currentMonthStart, end: currentMonthEnd }),
   );
 
   const monthlyWindows = eachMonthOfInterval({
@@ -313,9 +334,9 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     const monthStart = startOfMonth(monthDate);
     const monthEnd = endOfMonth(monthDate);
     const sales = completedSales.filter((sale) =>
-      isWithinInterval(new Date(sale.createdAt), { start: monthStart, end: monthEnd }),
+      isWithinInterval(getSaleTimelineDate(sale), { start: monthStart, end: monthEnd }),
     );
-    const revenue = sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+    const revenue = sales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0);
     const grossProfit = sales.reduce(
       (sum, sale) =>
         sum +
@@ -334,9 +355,9 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
   const salesTrendDays = Array.from({ length: 14 }, (_, index) => startOfDay(subDays(now, 13 - index)));
   const salesTrend = salesTrendDays.map((dayDate) => {
     const daySales = completedSales.filter((sale) =>
-      startOfDay(new Date(sale.createdAt)).getTime() === dayDate.getTime(),
+      startOfDay(getSaleTimelineDate(sale)).getTime() === dayDate.getTime(),
     );
-    const revenue = daySales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+    const revenue = daySales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0);
     const netProfit = daySales.reduce(
       (sum, sale) =>
         sum +
@@ -372,7 +393,7 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
       netProfit: 0,
     };
     employeeBucket.orders += 1;
-    employeeBucket.revenue += sale.totalAmount;
+    employeeBucket.revenue += getSaleNetTotal(sale);
     employeeBucket.netProfit += saleProfit;
     performanceByEmployee.set(sale.employeeId, employeeBucket);
 
@@ -384,7 +405,7 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
         netProfit: 0,
       };
       customerBucket.orders += 1;
-      customerBucket.revenue += sale.totalAmount;
+      customerBucket.revenue += getSaleNetTotal(sale);
       customerBucket.netProfit += saleProfit;
       performanceByCustomer.set(sale.customerName, customerBucket);
     }
@@ -489,15 +510,15 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     .filter((product) => product.isActive && product.stockQuantity <= product.reorderPoint)
     .map((product) => {
       const soldLast30Days = completedSales.reduce((sum, sale) => {
-        if (new Date(sale.createdAt) < subDays(now, 30)) {
+        if (getSaleTimelineDate(sale) < subDays(now, 30)) {
           return sum;
         }
 
         return (
           sum +
-          sale.items
-            .filter((item) => item.productId === product.id)
-            .reduce((lineSum, item) => lineSum + item.quantity, 0)
+          resolveLineMetrics(sale, productsById)
+            .filter((line) => line.productId === product.id)
+            .reduce((lineSum, line) => lineSum + line.quantity, 0)
         );
       }, 0);
       const dailyAverage = soldLast30Days / 30;
@@ -515,7 +536,7 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     .sort((left, right) => left.stockQuantity - right.stockQuantity)
     .slice(0, 8);
 
-  const currentWeekRevenue = currentWeekSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const currentWeekRevenue = currentWeekSales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0);
   const currentWeekProfit = currentWeekSales.reduce(
     (sum, sale) =>
       sum +
@@ -530,7 +551,7 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
   );
   const comparisonToPreviousWeek =
     previousWeekProfit === 0 ? 0 : (currentWeekProfit - previousWeekProfit) / previousWeekProfit;
-  const currentMonthRevenue = currentMonthSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const currentMonthRevenue = currentMonthSales.reduce((sum, sale) => sum + getSaleNetTotal(sale), 0);
   const currentMonthProfit = currentMonthSales.reduce(
     (sum, sale) =>
       sum +
