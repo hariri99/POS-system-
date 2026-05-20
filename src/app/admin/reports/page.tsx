@@ -1,12 +1,12 @@
 import { ExecutiveReportsDashboard } from "@/components/reports/executive-reports-dashboard";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireRole } from "@/lib/auth";
-import { getDashboardSnapshot } from "@/lib/platform";
+import { getReportsSnapshot } from "@/lib/platform";
 import { buildExecutiveReport } from "@/lib/reporting";
 
 export default async function AdminReportsPage() {
   const session = await requireRole("admin");
-  const snapshot = await getDashboardSnapshot(session);
+  const snapshot = await getReportsSnapshot(session);
   const report = buildExecutiveReport(snapshot);
 
   return (

@@ -12,7 +12,6 @@ import { createAdminSupabaseClient, createServerSupabaseClient } from "@/lib/sup
 import {
   type AlertRecord,
   type AppSession,
-  type BrandRecord,
   type CategoryRecord,
   type DashboardSnapshot,
   type EmployeeRecord,
@@ -26,7 +25,6 @@ import {
   type SaleRefundInput,
   type SaleRecord,
   type StockMovementRecord,
-  type SupplierRecord,
 } from "@/lib/types";
 
 function mapProduct(row: Record<string, unknown>): ProductRecord {
@@ -123,19 +121,6 @@ function mapEmployee(row: Record<string, unknown>): EmployeeRecord {
     totalSales: Number(row.total_sales ?? 0),
     totalRevenue: Number(row.total_revenue ?? 0),
     transactionCount: Number(row.transaction_count ?? 0),
-  };
-}
-
-function mapSupplier(row: Record<string, unknown>): SupplierRecord {
-  return {
-    id: String(row.id),
-    name: String(row.name),
-    contactName: String(row.contact_name ?? ""),
-    phone: String(row.phone ?? ""),
-    email: String(row.email ?? ""),
-    notes: String(row.notes ?? ""),
-    restockCount: Number(row.restock_count ?? 0),
-    activeProducts: Number(row.active_products ?? 0),
   };
 }
 
@@ -684,6 +669,31 @@ async function enrichSalesWithCompatibilityRefunds(
   });
 }
 
+async function maybeEnrichSalesWithCompatibilityRefunds(
+  sales: SaleRecord[],
+  branchId: string,
+  client: NonNullable<Awaited<ReturnType<typeof createServerSupabaseClient>>>,
+) {
+  if (sales.length === 0) {
+    return sales;
+  }
+
+  const admin = createAdminSupabaseClient();
+  if (!admin) {
+    return enrichSalesWithCompatibilityRefunds(sales, branchId, client);
+  }
+
+  const refundSchemaSupport = await getRefundSchemaSupport(admin);
+  const usesNativeRefundSchema =
+    refundSchemaSupport.salesRefundAmount && refundSchemaSupport.saleItemsRefundState;
+
+  if (usesNativeRefundSchema) {
+    return sales;
+  }
+
+  return enrichSalesWithCompatibilityRefunds(sales, branchId, client);
+}
+
 async function readSaleById(saleId: string, branchId: string) {
   const admin = createAdminSupabaseClient();
   const client = admin ?? (await createServerSupabaseClient());
@@ -707,7 +717,11 @@ async function readSaleById(saleId: string, branchId: string) {
     throw new Error("Sale not found.");
   }
 
-  const [sale] = await enrichSalesWithCompatibilityRefunds([mapSale(data as Record<string, unknown>)], branchId, client);
+  const [sale] = await maybeEnrichSalesWithCompatibilityRefunds(
+    [mapSale(data as Record<string, unknown>)],
+    branchId,
+    client,
+  );
   return sale;
 }
 
@@ -773,6 +787,35 @@ function generateFastInvoiceNumber() {
   const timestamp = Date.now().toString();
   const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 4).toUpperCase();
   return `INV-${timestamp.slice(-8)}-${suffix}`;
+}
+
+function buildSnapshotFromParts(
+  session: AppSession,
+  data: Partial<DashboardSnapshot> & Pick<DashboardSnapshot, "products" | "sales" | "expenses">,
+): DashboardSnapshot {
+  return {
+    session,
+    summary: data.summary ?? buildDashboardSummary(data),
+    salesTrend: data.salesTrend ?? [],
+    products: data.products,
+    sales: data.sales,
+    employees: data.employees ?? [],
+    suppliers: data.suppliers ?? [],
+    expenses: data.expenses,
+    alerts: data.alerts ?? [],
+    stockMovements: data.stockMovements ?? [],
+    categories: data.categories ?? [],
+    brands: data.brands ?? [],
+  };
+}
+
+async function getServerSupabaseClientOrThrow() {
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) {
+    throw new Error("Supabase client is not configured.");
+  }
+
+  return supabase;
 }
 
 async function createDirectSupabaseSale(input: PosSaleInput, session: AppSession) {
@@ -1664,59 +1707,43 @@ async function voidLegacyPendingSale(saleId: string, session: AppSession) {
 
 async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapshot> {
   assertSupabaseConfigured();
-  const supabase = await createServerSupabaseClient();
+  const supabase = await getServerSupabaseClientOrThrow();
 
   const [
     productsResult,
     salesResult,
     employeesResult,
-    suppliersResult,
     alertsResult,
-    movementsResult,
     expensesResult,
-    categoriesResult,
-    brandsResult,
     trendResult,
   ] = await Promise.all([
-    supabase!
+    supabase
       .from("product_catalog_view")
       .select("*")
       .eq("branch_id", session.branchId)
       .order("updated_at", { ascending: false }),
-    supabase!
+    supabase
       .from("sales_overview_view")
       .select("*")
       .eq("branch_id", session.branchId)
       .order("created_at", { ascending: false }),
-    supabase!
+    supabase
       .from("employee_performance_view")
       .select("*")
       .eq("branch_id", session.branchId)
       .order("total_revenue", { ascending: false }),
-    supabase!
-      .from("supplier_overview_view")
-      .select("*")
-      .order("name", { ascending: true }),
-    supabase!
+    supabase
       .from("alerts_view")
       .select("*")
       .eq("branch_id", session.branchId)
       .order("created_at", { ascending: false })
       .limit(8),
-    supabase!
-      .from("stock_movements_view")
-      .select("*")
-      .eq("branch_id", session.branchId)
-      .order("created_at", { ascending: false })
-      .limit(20),
-    supabase!
+    supabase
       .from("operating_expenses")
       .select("*")
       .eq("branch_id", session.branchId)
       .order("incurred_on", { ascending: false }),
-    supabase!.from("categories").select("id, name, slug").order("name"),
-    supabase!.from("brands").select("id, name").order("name"),
-    supabase!
+    supabase
       .from("sales_daily_view")
       .select("*")
       .eq("branch_id", session.branchId)
@@ -1728,15 +1755,11 @@ async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapsh
     productsResult.error,
     salesResult.error,
     employeesResult.error,
-    suppliersResult.error,
     alertsResult.error,
-    movementsResult.error,
     expensesResult.error &&
     !isMissingRelationError(expensesResult.error.message, "operating_expenses")
       ? expensesResult.error
       : null,
-    categoriesResult.error,
-    brandsResult.error,
     trendResult.error && !isMissingRelationError(trendResult.error.message, "sales_daily_view")
       ? trendResult.error
       : null,
@@ -1747,21 +1770,17 @@ async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapsh
   }
 
   const products = (productsResult.data ?? []).map((row) => mapProduct(row));
-  const sales = (await enrichSalesWithCompatibilityRefunds(
+  const sales = (await maybeEnrichSalesWithCompatibilityRefunds(
     (salesResult.data ?? []).map((row) => mapSale(row)),
     session.branchId,
-    supabase!,
+    supabase,
   )).sort((left, right) => getSaleSortDate(right).localeCompare(getSaleSortDate(left)));
   const employees = (employeesResult.data ?? []).map((row) => mapEmployee(row));
-  const suppliers = (suppliersResult.data ?? []).map((row) => mapSupplier(row));
   const alerts = (alertsResult.data ?? []).map((row) => mapAlert(row));
-  const stockMovements = (movementsResult.data ?? []).map((row) => mapStockMovement(row));
   const expenses =
     expensesResult.error && isMissingRelationError(expensesResult.error.message, "operating_expenses")
       ? []
       : (expensesResult.data ?? []).map((row) => mapExpense(row));
-  const categories = (categoriesResult.data ?? []) as CategoryRecord[];
-  const brands = (brandsResult.data ?? []) as BrandRecord[];
   const salesTrend =
     trendResult.data?.map((row) => ({
       label: new Date(String(row.day)).toLocaleDateString("en-US", {
@@ -1784,18 +1803,233 @@ async function getSupabaseSnapshot(session: AppSession): Promise<DashboardSnapsh
     products,
     sales,
     employees,
-    suppliers,
+    suppliers: [],
     expenses,
     alerts,
-    stockMovements,
-    categories,
-    brands,
+    stockMovements: [],
+    categories: [],
+    brands: [],
   };
 }
 
 export async function getDashboardSnapshot(session: AppSession) {
   assertSupabaseConfigured();
   return getSupabaseSnapshot(session);
+}
+
+export async function getAdminOverviewSnapshot(session: AppSession) {
+  assertSupabaseConfigured();
+  const supabase = await getServerSupabaseClientOrThrow();
+
+  const [productsResult, salesResult, alertsResult, expensesResult] = await Promise.all([
+    supabase
+      .from("product_catalog_view")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("sales_overview_view")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("alerts_view")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("created_at", { ascending: false })
+      .limit(8),
+    supabase
+      .from("operating_expenses")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("incurred_on", { ascending: false }),
+  ]);
+
+  const requiredErrors = [
+    productsResult.error,
+    salesResult.error,
+    alertsResult.error,
+    expensesResult.error &&
+    !isMissingRelationError(expensesResult.error.message, "operating_expenses")
+      ? expensesResult.error
+      : null,
+  ].find((error) => error);
+
+  if (requiredErrors) {
+    throw new Error(requiredErrors.message);
+  }
+
+  const products = (productsResult.data ?? []).map((row) => mapProduct(row));
+  const sales = (await maybeEnrichSalesWithCompatibilityRefunds(
+    (salesResult.data ?? []).map((row) => mapSale(row)),
+    session.branchId,
+    supabase,
+  )).sort((left, right) => getSaleSortDate(right).localeCompare(getSaleSortDate(left)));
+  const alerts = (alertsResult.data ?? []).map((row) => mapAlert(row));
+  const expenses =
+    expensesResult.error && isMissingRelationError(expensesResult.error.message, "operating_expenses")
+      ? []
+      : (expensesResult.data ?? []).map((row) => mapExpense(row));
+
+  return buildSnapshotFromParts(session, {
+    products,
+    sales,
+    expenses,
+    alerts,
+  });
+}
+
+export async function getReportsSnapshot(session: AppSession) {
+  assertSupabaseConfigured();
+  const supabase = await getServerSupabaseClientOrThrow();
+
+  const [productsResult, salesResult, expensesResult] = await Promise.all([
+    supabase
+      .from("product_catalog_view")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("sales_overview_view")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("operating_expenses")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("incurred_on", { ascending: false }),
+  ]);
+
+  const requiredErrors = [
+    productsResult.error,
+    salesResult.error,
+    expensesResult.error &&
+    !isMissingRelationError(expensesResult.error.message, "operating_expenses")
+      ? expensesResult.error
+      : null,
+  ].find((error) => error);
+
+  if (requiredErrors) {
+    throw new Error(requiredErrors.message);
+  }
+
+  const products = (productsResult.data ?? []).map((row) => mapProduct(row));
+  const sales = (await maybeEnrichSalesWithCompatibilityRefunds(
+    (salesResult.data ?? []).map((row) => mapSale(row)),
+    session.branchId,
+    supabase,
+  )).sort((left, right) => getSaleSortDate(right).localeCompare(getSaleSortDate(left)));
+  const expenses =
+    expensesResult.error && isMissingRelationError(expensesResult.error.message, "operating_expenses")
+      ? []
+      : (expensesResult.data ?? []).map((row) => mapExpense(row));
+
+  return buildSnapshotFromParts(session, {
+    products,
+    sales,
+    expenses,
+  });
+}
+
+export async function getProductsPageData(session: AppSession) {
+  assertSupabaseConfigured();
+  const supabase = await getServerSupabaseClientOrThrow();
+
+  const [productsResult, categoriesResult] = await Promise.all([
+    supabase
+      .from("product_catalog_view")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("updated_at", { ascending: false }),
+    supabase.from("categories").select("id, name, slug").order("name"),
+  ]);
+
+  const requiredErrors = [productsResult.error, categoriesResult.error].find((error) => error);
+  if (requiredErrors) {
+    throw new Error(requiredErrors.message);
+  }
+
+  return {
+    products: (productsResult.data ?? []).map((row) => mapProduct(row)),
+    categories: (categoriesResult.data ?? []) as CategoryRecord[],
+  };
+}
+
+export async function getSalesPageData(session: AppSession) {
+  assertSupabaseConfigured();
+  const supabase = await getServerSupabaseClientOrThrow();
+  const salesResult = await supabase
+    .from("sales_overview_view")
+    .select("*")
+    .eq("branch_id", session.branchId)
+    .order("created_at", { ascending: false });
+
+  if (salesResult.error) {
+    throw new Error(salesResult.error.message);
+  }
+
+  const sales = await maybeEnrichSalesWithCompatibilityRefunds(
+    (salesResult.data ?? []).map((row) => mapSale(row)),
+    session.branchId,
+    supabase,
+  );
+
+  return {
+    sales: sales.sort((left, right) => getSaleSortDate(right).localeCompare(getSaleSortDate(left))),
+  };
+}
+
+export async function getEmployeesPageData(session: AppSession) {
+  assertSupabaseConfigured();
+  const supabase = await getServerSupabaseClientOrThrow();
+  const employeesResult = await supabase
+    .from("employee_performance_view")
+    .select("*")
+    .eq("branch_id", session.branchId)
+    .order("total_revenue", { ascending: false });
+
+  if (employeesResult.error) {
+    throw new Error(employeesResult.error.message);
+  }
+
+  return {
+    employees: (employeesResult.data ?? []).map((row) => mapEmployee(row)),
+  };
+}
+
+export async function getPosPageData(session: AppSession) {
+  assertSupabaseConfigured();
+  const supabase = await getServerSupabaseClientOrThrow();
+
+  const [productsResult, salesResult] = await Promise.all([
+    supabase
+      .from("product_catalog_view")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .eq("is_active", true)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("sales_overview_view")
+      .select("*")
+      .eq("branch_id", session.branchId)
+      .order("created_at", { ascending: false })
+      .limit(8),
+  ]);
+
+  const requiredErrors = [productsResult.error, salesResult.error].find((error) => error);
+  if (requiredErrors) {
+    throw new Error(requiredErrors.message);
+  }
+
+  return {
+    products: (productsResult.data ?? []).map((row) => mapProduct(row)),
+    recentSales: (await maybeEnrichSalesWithCompatibilityRefunds(
+      (salesResult.data ?? []).map((row) => mapSale(row)),
+      session.branchId,
+      supabase,
+    )).sort((left, right) => getSaleSortDate(right).localeCompare(getSaleSortDate(left))),
+  };
 }
 
 export async function createSale(input: PosSaleInput, session: AppSession) {
@@ -2138,8 +2372,8 @@ export async function adjustInventory(input: InventoryAdjustmentInput, session: 
 }
 
 export async function getPosProducts(session: AppSession) {
-  const snapshot = await getDashboardSnapshot(session);
-  return snapshot.products.filter((product) => product.isActive);
+  const data = await getPosPageData(session);
+  return data.products;
 }
 
 export function getDemoDataset() {

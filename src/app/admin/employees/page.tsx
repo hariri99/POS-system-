@@ -1,12 +1,12 @@
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireRole } from "@/lib/auth";
-import { getDashboardSnapshot } from "@/lib/platform";
+import { getEmployeesPageData } from "@/lib/platform";
 import { formatCurrency, relativeTime } from "@/lib/utils";
 
 export default async function AdminEmployeesPage() {
   const session = await requireRole("admin");
-  const snapshot = await getDashboardSnapshot(session);
+  const data = await getEmployeesPageData(session);
 
   return (
     <div className="space-y-6">
@@ -14,10 +14,10 @@ export default async function AdminEmployeesPage() {
         eyebrow="Employees"
         title="Staff activity and performance"
         description="Review sales contribution, transaction volume, role assignment, and recent access patterns without the visual noise of a generic SaaS panel."
-        badge={`${snapshot.employees.length} team members`}
+        badge={`${data.employees.length} team members`}
       />
       <div className="grid gap-6 xl:grid-cols-2">
-        {snapshot.employees.map((employee) => (
+        {data.employees.map((employee) => (
           <Card key={employee.id} className="space-y-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>

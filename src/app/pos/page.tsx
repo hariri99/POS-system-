@@ -3,11 +3,11 @@ import { RealtimeRefresh } from "@/components/realtime/realtime-refresh";
 import { PageHeader } from "@/components/ui/page-header";
 import { AppShell } from "@/components/shell/app-shell";
 import { requireRole } from "@/lib/auth";
-import { getDashboardSnapshot } from "@/lib/platform";
+import { getPosPageData } from "@/lib/platform";
 
 export default async function PosPage() {
   const session = await requireRole(["admin", "employee"]);
-  const snapshot = await getDashboardSnapshot(session);
+  const data = await getPosPageData(session);
 
   return (
     <AppShell session={session}>
@@ -21,11 +21,11 @@ export default async function PosPage() {
           eyebrow="POS"
           title="Cashier terminal"
           description="Search products fast, update quantities instantly, and complete inventory-aware sales with minimal clicks."
-          badge={`${snapshot.products.length} sellable products`}
+          badge={`${data.products.length} sellable products`}
         />
         <PosTerminal
-          products={snapshot.products}
-          recentSales={snapshot.sales}
+          products={data.products}
+          recentSales={data.recentSales}
           canViewAdvancedPricing={session.role === "admin"}
         />
       </div>

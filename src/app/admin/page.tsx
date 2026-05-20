@@ -5,13 +5,13 @@ import { RealtimeRefresh } from "@/components/realtime/realtime-refresh";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireRole } from "@/lib/auth";
-import { getDashboardSnapshot } from "@/lib/platform";
+import { getAdminOverviewSnapshot } from "@/lib/platform";
 import { buildExecutiveReport } from "@/lib/reporting";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 export default async function AdminOverviewPage() {
   const session = await requireRole("admin");
-  const snapshot = await getDashboardSnapshot(session);
+  const snapshot = await getAdminOverviewSnapshot(session);
   const report = buildExecutiveReport(snapshot);
 
   return (

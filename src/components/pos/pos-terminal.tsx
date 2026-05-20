@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState, useTransition } from "react";
+import { useDeferredValue, useMemo, useState, useTransition } from "react";
 import { Minus, Plus, Search, Trash2 } from "lucide-react";
 import { SaleProductsPreview } from "@/components/sales/sale-products-preview";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { Select } from "@/components/ui/select";
 import { usePosStore } from "@/stores/pos-store";
 import { type PaymentMethod, type ProductRecord, type SaleRecord } from "@/lib/types";
 import { formatCurrency, formatPaymentMethod } from "@/lib/utils";
+
+const POS_RECENT_SALES_LIMIT = 8;
 
 function normalizeUnitPriceDraft(value: string) {
   if (value === "") {
@@ -53,16 +55,17 @@ export function PosTerminal({
   const [recentSales, setRecentSales] = useState(initialSales);
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const deferredQuery = useDeferredValue(query);
 
   const filteredProducts = useMemo(() => {
-    const normalized = query.toLowerCase();
+    const normalized = deferredQuery.toLowerCase();
     return products.filter((product) =>
       [product.name, product.flavor, product.sku, product.barcode]
         .join(" ")
         .toLowerCase()
         .includes(normalized),
     );
-  }, [products, query]);
+  }, [deferredQuery, products]);
 
   const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const total = subtotal;
@@ -142,20 +145,23 @@ export function PosTerminal({
 
       const sale = payload.data as SaleRecord;
       startTransition(() => {
+        const soldQuantities = new Map(
+          sale.items.map((item) => [item.productId, item.quantity] as const),
+        );
         setProducts((current) =>
           current.map((product) => {
-            const matchingLine = sale.items.find((item) => item.productId === product.id);
-            if (!matchingLine) {
+            const matchingQuantity = soldQuantities.get(product.id);
+            if (!matchingQuantity) {
               return product;
             }
 
             return {
               ...product,
-              stockQuantity: Math.max(0, product.stockQuantity - matchingLine.quantity),
+              stockQuantity: Math.max(0, product.stockQuantity - matchingQuantity),
             };
           }),
         );
-        setRecentSales((current) => [sale, ...current]);
+        setRecentSales((current) => [sale, ...current].slice(0, POS_RECENT_SALES_LIMIT));
         clearCart();
         setUnitPriceDrafts({});
         setNotes("");
@@ -265,7 +271,7 @@ export function PosTerminal({
           </div>
           <div className="subtle-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
             <div className="space-y-3">
-              {recentSales.slice(0, 8).map((sale) => (
+              {recentSales.slice(0, POS_RECENT_SALES_LIMIT).map((sale) => (
                 <div key={sale.id} className="surface-card-strong rounded-[18px] p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0 flex-1">

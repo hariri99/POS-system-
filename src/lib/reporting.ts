@@ -25,7 +25,6 @@ import {
   type DashboardSummary,
   type DashboardSnapshot,
   type ExpenseRecord,
-  type ProductPricingTier,
   type ProductRecord,
   type SaleRecord,
 } from "@/lib/types";
@@ -38,7 +37,6 @@ type ResolvedLineMetrics = {
   profit: number;
   cost: number;
   quantity: number;
-  pricingTier: ProductPricingTier;
 };
 
 type CategoryAccumulator = {
@@ -77,19 +75,6 @@ export interface SalesTrendPoint {
   transactions: number;
 }
 
-export interface ProductPerformancePoint {
-  productId: string;
-  productName: string;
-  categoryName: string;
-  unitsSold: number;
-  revenue: number;
-  netProfit: number;
-  marginRate: number;
-  retailRevenue: number;
-  wholesaleRevenue: number;
-  discountRevenue: number;
-}
-
 export interface CategoryPerformancePoint {
   categoryName: string;
   revenue: number;
@@ -104,8 +89,6 @@ export interface ExecutiveReport {
   kpis: ReportKpi;
   monthlyProfitTrend: ProfitTrendPoint[];
   salesTrend: SalesTrendPoint[];
-  topProducts: ProductPerformancePoint[];
-  lowestMarginProducts: ProductPerformancePoint[];
   categoryPerformance: CategoryPerformancePoint[];
   expiryAlerts: ExpiryInsightPoint[];
   lowStockIntelligence: LowStockInsightPoint[];
@@ -188,10 +171,6 @@ function resolveLineMetrics(
         cost: unitCost * quantity,
         revenue: baseRevenue,
         profit: baseProfit,
-        pricingTier:
-          "pricingTier" in item && item.pricingTier
-            ? item.pricingTier
-            : ("retail" satisfies ProductPricingTier),
       };
     })
     .filter((line): line is ResolvedLineMetrics => line !== null);
@@ -383,7 +362,6 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     };
   });
 
-  const performanceByProduct = new Map<string, ProductPerformancePoint>();
   const performanceByCategory = new Map<string, CategoryAccumulator>();
   const performanceByEmployee = new Map<string, EmployeePerformancePoint>();
 
@@ -404,32 +382,6 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     performanceByEmployee.set(sale.employeeId, employeeBucket);
 
     lines.forEach((line) => {
-      const productBucket = performanceByProduct.get(line.productId) ?? {
-        productId: line.productId,
-        productName: line.productName,
-        categoryName: line.categoryName,
-        unitsSold: 0,
-        revenue: 0,
-        netProfit: 0,
-        marginRate: 0,
-        retailRevenue: 0,
-        wholesaleRevenue: 0,
-        discountRevenue: 0,
-      };
-
-      productBucket.unitsSold += line.quantity;
-      productBucket.revenue += line.revenue;
-      productBucket.netProfit += line.profit;
-      if (line.pricingTier === "retail") {
-        productBucket.retailRevenue += line.revenue;
-      } else if (line.pricingTier === "wholesale") {
-        productBucket.wholesaleRevenue += line.revenue;
-      } else {
-        productBucket.discountRevenue += line.revenue;
-      }
-
-      performanceByProduct.set(line.productId, productBucket);
-
       const categoryBucket = performanceByCategory.get(line.categoryName) ?? {
         categoryName: line.categoryName,
         revenue: 0,
@@ -456,17 +408,6 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     categoryBucket.inventoryValue += product.stockQuantity * product.costPrice;
     performanceByCategory.set(product.categoryName, categoryBucket);
   });
-
-  const topProducts = Array.from(performanceByProduct.values())
-    .map((product) => ({
-      ...product,
-      marginRate: product.revenue > 0 ? product.netProfit / product.revenue : 0,
-    }))
-    .sort((left, right) => right.netProfit - left.netProfit);
-
-  const lowestMarginProducts = [...topProducts]
-    .filter((product) => product.unitsSold > 0)
-    .sort((left, right) => left.marginRate - right.marginRate);
 
   const totalCategoryProfit = Array.from(performanceByCategory.values()).reduce(
     (sum, category) => sum + category.netProfit,
@@ -566,8 +507,6 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
     },
     monthlyProfitTrend,
     salesTrend,
-    topProducts: topProducts.slice(0, 8),
-    lowestMarginProducts: lowestMarginProducts.slice(0, 8),
     categoryPerformance,
     expiryAlerts,
     lowStockIntelligence,

@@ -292,20 +292,11 @@ export function ProductManager({
   }, [products, deferredQuery, categoryFilter, stockFilter, sortBy]);
 
   const pageCount = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
-
-  useEffect(() => {
-    setCurrentPage((page) => Math.min(page, pageCount));
-  }, [pageCount]);
-
-  useEffect(() => {
-    setSelectedIds((current) =>
-      current.filter((id) => products.some((product) => product.id === id)),
-    );
-  }, [products]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [deferredQuery, categoryFilter, stockFilter, sortBy]);
+  const currentPageWithinBounds = Math.min(currentPage, pageCount);
+  const selectedProductIds = useMemo(() => {
+    const availableIds = new Set(products.map((product) => product.id));
+    return selectedIds.filter((id) => availableIds.has(id));
+  }, [products, selectedIds]);
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -332,13 +323,13 @@ export function ProductManager({
   }, []);
 
   const paginatedProducts = filteredProducts.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize,
+    (currentPageWithinBounds - 1) * pageSize,
+    currentPageWithinBounds * pageSize,
   );
 
   const pageSelectionIds = paginatedProducts.map((product) => product.id);
   const allVisibleSelected =
-    pageSelectionIds.length > 0 && pageSelectionIds.every((id) => selectedIds.includes(id));
+    pageSelectionIds.length > 0 && pageSelectionIds.every((id) => selectedProductIds.includes(id));
 
   const lowStockCount = products.filter(
     (product) => product.isActive && product.stockQuantity <= product.reorderPoint,
@@ -393,12 +384,41 @@ export function ProductManager({
 
   function toggleSelectVisible() {
     setSelectedIds((current) => {
+      const nextSelectedIds = current.filter((id) => products.some((product) => product.id === id));
       if (allVisibleSelected) {
-        return current.filter((id) => !pageSelectionIds.includes(id));
+        return nextSelectedIds.filter((id) => !pageSelectionIds.includes(id));
       }
 
-      return Array.from(new Set([...current, ...pageSelectionIds]));
+      return Array.from(new Set([...nextSelectedIds, ...pageSelectionIds]));
     });
+  }
+
+  function handleQueryChange(value: string) {
+    setCurrentPage(1);
+    setQuery(value);
+  }
+
+  function handleCategoryFilterChange(value: string) {
+    setCurrentPage(1);
+    setCategoryFilter(value);
+  }
+
+  function handleStockFilterChange(value: ProductStockFilter) {
+    setCurrentPage(1);
+    setStockFilter(value);
+  }
+
+  function handleSortByChange(value: ProductSortOption) {
+    setCurrentPage(1);
+    setSortBy(value);
+  }
+
+  function resetFilters() {
+    setCurrentPage(1);
+    setQuery("");
+    setCategoryFilter("all");
+    setStockFilter("all");
+    setSortBy("updated-desc");
   }
 
   async function uploadImage(file: File) {
@@ -585,11 +605,11 @@ export function ProductManager({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {selectedIds.length > 0 ? (
+            {selectedProductIds.length > 0 ? (
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => void deleteProducts(selectedIds)}
+                onClick={() => void deleteProducts(selectedProductIds)}
                 disabled={isPending}
               >
                 <Trash2 className="size-4" />
@@ -655,11 +675,16 @@ export function ProductManager({
                     className="h-auto border-none bg-transparent px-0 text-[var(--heading)] focus:ring-0"
                     placeholder="Search product, flavor, brand, supplier"
                     value={query}
-                    onChange={(event) => setQuery(event.target.value)}
+                    onChange={(event) => handleQueryChange(event.target.value)}
                   />
                 </div>
 
-                <Select value={stockFilter} onChange={(event) => setStockFilter(event.target.value as ProductStockFilter)}>
+                <Select
+                  value={stockFilter}
+                  onChange={(event) =>
+                    handleStockFilterChange(event.target.value as ProductStockFilter)
+                  }
+                >
                   <option value="all">All statuses</option>
                   <option value="active">Active only</option>
                   <option value="low">Low stock</option>
@@ -667,7 +692,10 @@ export function ProductManager({
                   <option value="archived">Archived</option>
                 </Select>
 
-                <Select value={sortBy} onChange={(event) => setSortBy(event.target.value as ProductSortOption)}>
+                <Select
+                  value={sortBy}
+                  onChange={(event) => handleSortByChange(event.target.value as ProductSortOption)}
+                >
                   <option value="updated-desc">Recently updated</option>
                   <option value="name-asc">Name A-Z</option>
                   <option value="stock-desc">Stock high to low</option>
@@ -676,12 +704,12 @@ export function ProductManager({
                   <option value="price-asc">Lowest price</option>
                 </Select>
 
-                <Button type="button" variant="secondary" className="justify-center" onClick={() => {
-                  setQuery("");
-                  setCategoryFilter("all");
-                  setStockFilter("all");
-                  setSortBy("updated-desc");
-                }}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="justify-center"
+                  onClick={resetFilters}
+                >
                   Reset filters
                 </Button>
               </div>
@@ -690,7 +718,7 @@ export function ProductManager({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setCategoryFilter("all")}
+                onClick={() => handleCategoryFilterChange("all")}
                 className={cn(
                   "rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors",
                   categoryFilter === "all"
@@ -705,7 +733,7 @@ export function ProductManager({
                 <button
                   key={category.id}
                   type="button"
-                  onClick={() => setCategoryFilter(category.id)}
+                  onClick={() => handleCategoryFilterChange(category.id)}
                   className={cn(
                     "rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors",
                     categoryFilter === category.id
@@ -727,11 +755,11 @@ export function ProductManager({
               </div>
             ) : null}
 
-            {selectedIds.length > 0 ? (
+            {selectedProductIds.length > 0 ? (
               <div className="flex flex-col gap-3 rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3 text-sm md:flex-row md:items-center md:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge className="border-[var(--border-accent)] bg-[var(--brand-surface)] text-[var(--brand)]">
-                    {selectedIds.length} selected
+                    {selectedProductIds.length} selected
                   </Badge>
                   <p className="text-[var(--muted-foreground)]">
                     Delete unused products from the catalog in one step.
@@ -741,8 +769,8 @@ export function ProductManager({
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => void deleteProducts(selectedIds)}
-                    disabled={selectedIds.length === 0 || isPending}
+                    onClick={() => void deleteProducts(selectedProductIds)}
+                    disabled={selectedProductIds.length === 0 || isPending}
                   >
                     <Trash2 className="size-4" />
                     Delete selected
@@ -783,7 +811,7 @@ export function ProductManager({
             <tbody>
               {paginatedProducts.map((product) => {
                 const health = getProductHealth(product);
-                const selected = selectedIds.includes(product.id);
+                const selected = selectedProductIds.includes(product.id);
 
                 return (
                   <tr key={product.id} className={selected ? "bg-[var(--table-row-hover)]" : undefined}>
@@ -940,11 +968,11 @@ export function ProductManager({
           <p className="text-[var(--muted-foreground)]">
             Showing{" "}
             <span className="font-medium text-[var(--heading)]">
-              {filteredProducts.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
+              {filteredProducts.length === 0 ? 0 : (currentPageWithinBounds - 1) * pageSize + 1}
             </span>{" "}
             to{" "}
             <span className="font-medium text-[var(--heading)]">
-              {Math.min(currentPage * pageSize, filteredProducts.length)}
+              {Math.min(currentPageWithinBounds * pageSize, filteredProducts.length)}
             </span>{" "}
             of <span className="font-medium text-[var(--heading)]">{filteredProducts.length}</span>{" "}
             products
@@ -955,20 +983,20 @@ export function ProductManager({
               type="button"
               variant="secondary"
               className="h-9 px-3"
-              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(Math.max(1, currentPageWithinBounds - 1))}
+              disabled={currentPageWithinBounds === 1}
             >
               Previous
             </Button>
             <Badge>
-              Page {currentPage} / {pageCount}
+              Page {currentPageWithinBounds} / {pageCount}
             </Badge>
             <Button
               type="button"
               variant="secondary"
               className="h-9 px-3"
-              onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))}
-              disabled={currentPage === pageCount}
+              onClick={() => setCurrentPage(Math.min(pageCount, currentPageWithinBounds + 1))}
+              disabled={currentPageWithinBounds === pageCount}
             >
               Next
             </Button>
