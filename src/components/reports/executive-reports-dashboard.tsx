@@ -1,12 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -14,6 +12,7 @@ import {
 } from "recharts";
 import { SaleProductsPreview } from "@/components/sales/sale-products-preview";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   cn,
@@ -25,6 +24,8 @@ import {
 } from "@/lib/utils";
 import type { ExecutiveReport } from "@/lib/reporting";
 import type { SaleRecord } from "@/lib/types";
+
+const RECENT_ACTIVITY_PREVIEW_COUNT = 3;
 
 function KpiCard({
   label,
@@ -101,6 +102,12 @@ export function ExecutiveReportsDashboard({
   report: ExecutiveReport;
   recentSales: SaleRecord[];
 }) {
+  const [showAllRecentActivity, setShowAllRecentActivity] = useState(false);
+  const hasMoreRecentActivity = recentSales.length > RECENT_ACTIVITY_PREVIEW_COUNT;
+  const visibleRecentSales = showAllRecentActivity
+    ? recentSales
+    : recentSales.slice(0, RECENT_ACTIVITY_PREVIEW_COUNT);
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
@@ -150,13 +157,19 @@ export function ExecutiveReportsDashboard({
         <SectionCard
           title="Monthly Revenue vs Net Profit"
           description="Revenue stays separate from actual earnings so the owner can see whether growth is truly profitable."
-          aside={<Badge>{report.monthlyProfitTrend.length} months</Badge>}
+          aside={<Badge>Jan to Dec</Badge>}
         >
           <div className="h-[320px] min-w-0">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={report.monthlyProfitTrend} barGap={10}>
+              <BarChart data={report.monthlyProfitTrend} barCategoryGap="20%" barGap={8}>
                 <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} stroke="var(--muted-foreground)" />
+                <XAxis
+                  dataKey="label"
+                  tickLine={false}
+                  axisLine={false}
+                  stroke="var(--muted-foreground)"
+                  interval={0}
+                />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
@@ -173,10 +186,25 @@ export function ExecutiveReportsDashboard({
                   labelFormatter={(_, payload) =>
                     payload?.[0]?.payload?.fullLabel ?? "Month"
                   }
-                  formatter={(value) => formatCurrency(typeof value === "number" ? value : Number(value ?? 0))}
+                  formatter={(value, name) => [
+                    formatCurrency(typeof value === "number" ? value : Number(value ?? 0)),
+                    name === "netProfit" ? "Net profit" : "Revenue",
+                  ]}
                 />
-                <Bar dataKey="revenue" fill="var(--brand-surface-strong)" radius={[10, 10, 0, 0]} />
-                <Bar dataKey="netProfit" fill="var(--brand)" radius={[10, 10, 0, 0]} />
+                <Bar
+                  dataKey="revenue"
+                  name="Revenue"
+                  fill="var(--brand-surface-strong)"
+                  radius={[10, 10, 0, 0]}
+                  maxBarSize={28}
+                />
+                <Bar
+                  dataKey="netProfit"
+                  name="Net profit"
+                  fill="var(--brand)"
+                  radius={[10, 10, 0, 0]}
+                  maxBarSize={28}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -184,14 +212,21 @@ export function ExecutiveReportsDashboard({
 
         <SectionCard
           title="Sales Trend"
-          description="Daily revenue and profit trend for identifying strong periods, weak stretches, and operational momentum."
+          description="Daily revenue and profit bars for the current month so each day is easier to compare operationally."
           aside={<Badge>{report.salesTrend.length} days</Badge>}
         >
           <div className="h-[320px] min-w-0">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={report.salesTrend}>
+              <BarChart data={report.salesTrend} barCategoryGap="32%" barGap={4}>
                 <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} stroke="var(--muted-foreground)" />
+                <XAxis
+                  dataKey="label"
+                  tickLine={false}
+                  axisLine={false}
+                  stroke="var(--muted-foreground)"
+                  minTickGap={10}
+                  tickFormatter={(value, index) => (index % 2 === 0 ? String(value) : "")}
+                />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
@@ -215,18 +250,27 @@ export function ExecutiveReportsDashboard({
                       return `${numericValue} orders`;
                     }
 
-                    return formatCurrency(numericValue);
+                    return [
+                      formatCurrency(numericValue),
+                      name === "netProfit" ? "Net profit" : "Revenue",
+                    ];
                   }}
                 />
-                <Line type="monotone" dataKey="revenue" stroke="var(--brand)" strokeWidth={2.5} dot={false} />
-                <Line
-                  type="monotone"
-                  dataKey="netProfit"
-                  stroke="var(--brand-strong)"
-                  strokeWidth={2.25}
-                  dot={false}
+                <Bar
+                  dataKey="revenue"
+                  name="Revenue"
+                  fill="var(--brand-surface-strong)"
+                  radius={[8, 8, 0, 0]}
+                  maxBarSize={18}
                 />
-              </LineChart>
+                <Bar
+                  dataKey="netProfit"
+                  name="Net profit"
+                  fill="var(--brand)"
+                  radius={[8, 8, 0, 0]}
+                  maxBarSize={18}
+                />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </SectionCard>
@@ -493,12 +537,15 @@ export function ExecutiveReportsDashboard({
         <SectionCard
           title="Recent Activity"
           description="Latest completed orders for quick operational review."
+          aside={
+            recentSales.length > 0 ? <Badge>{recentSales.length} activities</Badge> : undefined
+          }
         >
           {recentSales.length === 0 ? (
             <EmptyState label="Recent transactions will appear here once orders are completed." />
           ) : (
             <div className="space-y-3">
-              {recentSales.slice(0, 6).map((sale) => (
+              {visibleRecentSales.map((sale) => (
                 <div
                   key={sale.id}
                   className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3"
@@ -511,7 +558,7 @@ export function ExecutiveReportsDashboard({
                       </p>
                       <SaleProductsPreview
                         items={sale.items}
-                        maxVisible={3}
+                        maxVisible={2}
                         compact
                         showSummary={false}
                         className="mt-3"
@@ -528,6 +575,25 @@ export function ExecutiveReportsDashboard({
                   </div>
                 </div>
               ))}
+
+              {hasMoreRecentActivity ? (
+                <div className="flex flex-col gap-3 rounded-[18px] border border-dashed border-[var(--border)] bg-[var(--surface-soft)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-[var(--muted-foreground)]">
+                    {showAllRecentActivity
+                      ? `Showing all ${recentSales.length} recent activities.`
+                      : `Showing ${visibleRecentSales.length} of ${recentSales.length} recent activities.`}
+                  </p>
+                  <Button
+                    variant="secondary"
+                    className="w-full sm:w-auto"
+                    onClick={() => setShowAllRecentActivity((current) => !current)}
+                  >
+                    {showAllRecentActivity
+                      ? "Show less"
+                      : `View more (${recentSales.length - visibleRecentSales.length})`}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
         </SectionCard>

@@ -10,14 +10,15 @@ import {
   eachMonthOfInterval,
   endOfDay,
   endOfMonth,
+  endOfYear,
   endOfWeek,
   format,
   isWithinInterval,
   startOfDay,
   startOfMonth,
+  startOfYear,
   startOfWeek,
   subDays,
-  subMonths,
   subWeeks,
 } from "date-fns";
 import {
@@ -309,6 +310,8 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
   const previousWeekEnd = subDays(currentWeekStart, 1);
   const currentMonthStart = startOfMonth(now);
   const currentMonthEnd = endOfMonth(now);
+  const currentYearStart = startOfYear(now);
+  const currentYearEnd = endOfYear(now);
 
   const currentWeekSales = completedSales.filter((sale) =>
     isWithinInterval(getSaleTimelineDate(sale), {
@@ -327,8 +330,8 @@ export function buildExecutiveReport(snapshot: DashboardSnapshot): ExecutiveRepo
   );
 
   const monthlyWindows = eachMonthOfInterval({
-    start: startOfMonth(subMonths(now, 11)),
-    end: currentMonthStart,
+    start: currentYearStart,
+    end: currentYearEnd,
   });
 
   const monthlyProfitTrend = monthlyWindows.map((monthDate) => {
